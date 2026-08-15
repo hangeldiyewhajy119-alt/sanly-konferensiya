@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="tk">
+<head>
+    <meta charset="UTF-8">
+    <title>Sanly Konferensiýa - Ekran Paýlaşmak</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #1a1a1a; color: white; margin: 0; padding: 20px; box-sizing: border-box; }
+        
+        /* Giriş (Lobby) Paneli */
+        #lobbyModal {
+            max-width: 400px;
+            margin: 80px auto;
+            background: #252525;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+            border: 1px solid #444;
+        }
+        #lobbyModal h2 { margin-bottom: 20px; color: #2d8cff; text-align: center; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        .input-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #bbb; }
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: #1a1a1a;
+            color: white;
+            box-sizing: border-box;
+            outline: none;
+        }
+        .primary-btn {
+            width: 100%;
+            padding: 12px;
+            background: #2d8cff;
+            border: none;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .primary-btn:hover { background: #005bb5; }
+
+        /* Konferensiýa Esasy Otagy */
+        #conferenceRoom { display: none; }
+        
+        .main-layout {
+            display: flex;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+            height: calc(100vh - 100px);
+        }
+
+        .video-section {
+            flex: 3;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #252525;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            margin-bottom: 15px;
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .video-box {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            border: 2px solid #333;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .video-box:hover { border-color: #2d8cff; }
+
+        /* Ulaltmak (Spotlight) re₆imi: bir wideo uly, galanlary kici düzülýär */
+        .video-grid.spotlight-mode {
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            gap: 15px;
+        }
+        .video-grid.spotlight-mode .video-box {
+            order: 2;
+            flex: 0 0 160px;
+            aspect-ratio: 16 / 9;
+        }
+        .video-grid.spotlight-mode .video-box.pinned {
+            order: 1;
+            flex: 1 1 100%;
+            aspect-ratio: unset;
+            min-height: 420px;
+            border-color: #2d8cff;
+        }
+        .pin-hint {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 7px;
+            border-radius: 5px;
+            font-size: 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .video-box:hover .pin-hint { opacity: 1; }
+
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        .user-label {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        /* Gatnaşyjylar Paneli */
+        .participants-section {
+            border-bottom: 1px solid #444;
+        }
+        .participants-header {
+            padding: 12px 15px;
+            font-weight: bold;
+            font-size: 14px;
+            color: #2d8cff;
+        }
+        .participants-list {
+            max-height: 160px;
+            overflow-y: auto;
+            padding: 0 15px 12px;
+        }
+        .participant-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #333;
+            gap: 8px;
+        }
+        .participant-item:last-child { border-bottom: none; }
+        .participant-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .participant-status { display: flex; gap: 6px; flex-shrink: 0; }
+        .status-badge {
+            background: #e81123;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        /* Gapdal Çat Paneli */
+        .chat-section {
+            flex: 1;
+            background: #252525;
+            border-radius: 8px;
+            border: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            max-width: 350px;
+            height: 100%;
+        }
+
+        .chat-header {
+            padding: 15px;
+            border-bottom: 1px solid #444;
+            font-weight: bold;
+            font-size: 16px;
+            color: #2d8cff;
+            text-align: center;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            text-align: left;
+        }
+
+        .chat-message {
+            background: #1a1a1a;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            border-left: 3px solid #2d8cff;
+        }
+
+        .chat-message .sender {
+            font-weight: bold;
+            color: #2d8cff;
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+
+        .chat-input-area {
+            padding: 15px;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input-area input {
+            flex-grow: 1;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: #1a1a1a;
+            color: white;
+            outline: none;
+        }
+
+        button {
+            padding: 10px 18px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #2d2d2d;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 8px;
+            transition: background 0.3s;
+        }
+
+        button:hover { background: #444; }
+        button.active { background: #e81123; border-color: #e81123; }
+        
+        /* Ekran paýlaşmak düwmesi üçin ýörite reňk */
+        #shareScreenBtn { background: #28a745; border-color: #28a745; }
+        #shareScreenBtn:hover { background: #1e7e34; }
+        #shareScreenBtn.sharing { background: #e81123; border-color: #e81123; }
+
+        /* Ýazgy etmek düwmesi üçin ýörite reňk */
+        #recordBtn { background: #6f2dff; border-color: #6f2dff; }
+        #recordBtn:hover { background: #5620cc; }
+        #recordBtn.active { background: #e81123; border-color: #e81123; }
+    </style>
+</head>
+<body>
+
+    <!-- Giriş (Lobby) Paneli -->
+    <div id="lobbyModal">
+        <h2>Sanly Konferensiýa</h2>
+        <div class="input-group">
+            <label>Adyňyz we Familiýaňyz:</label>
+            <input type="text" id="nameInput" placeholder="Hajymuhammet...">
+        </div>
+        <div class="input-group">
+            <label>Otag Belgisi (Room ID):</label>
+            <input type="text" id="roomInput" value="halkara-otag-1">
+        </div>
+        <div class="input-group">
+            <label>Mikrofon Saýla:</label>
+            <select id="audioSource"></select>
+        </div>
+        <div class="input-group">
+            <label>Kamera Saýla:</label>
+            <select id="videoSource"></select>
+        </div>
+        <button class="primary-btn" id="joinBtn">Otaga Gir</button>
+    </div>
+
+    <!-- Konferensiýa Esasy Otagy we Çat -->
+    <div id="conferenceRoom">
+        <div class="header-info">
+            <span id="roomTitleInfo">Otag: halkara-otag-1</span>
+            <button onclick="location.reload()" style="background: #e81123; border:none;">Otagdan Çyk</button>
+        </div>
+
+        <div class="main-layout">
+            <div class="video-section">
+                <div class="video-grid" id="videoGrid">
+                    <!-- Öz wideomyz -->
+                    <div class="video-box" id="localVideoBox">
+                        <video id="localVideo" autoplay muted playsinline></video>
+                        <span class="pin-hint">🔍 Ulaltmak üçin bas</span>
+                        <div class="user-label">
+                            <span id="handIcon" style="display:none;">✋</span>
+                            <span id="localMicStatus" style="display:none;">🔇</span>
+                            <span id="localCamStatus" style="display:none;">🚫📷</span>
+                            <span id="displayNameText">Men</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="muteAudioBtn">Mikrofony Öçür</button>
+                    <button id="muteVideoBtn">Kamerany Öçür</button>
+                    <button id="raiseHandBtn" style="background: #d88b00; border:none;">✋ Eliňi Göter</button>
+                    <button id="shareScreenBtn">🖥️ Ekran Paýlaş</button>
+                    <button id="recordBtn">⏺️ Ýazgy Başla</button>
+                </div>
+            </div>
+
+            <!-- Çat Bölümi -->
+            <div class="chat-section">
+                <!-- Gatnaşyjylar Bölümi -->
+                <div class="participants-section">
+                    <div class="participants-header">👥 Gatnaşyjylar (<span id="participantCount">1</span>)</div>
+                    <div class="participants-list" id="participantsList"></div>
+                </div>
+                <div class="chat-header">Konferensiýa Çaty</div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-message">
+                        <div class="sender">Ulgam</div>
+                        Hoş geldiňiz! Söhbetdeşlige ýazyp bilersiňiz.
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chatInput" placeholder="Hat ýazyň...">
+                    <button id="sendChatBtn" style="background: #2d8cff; border:none;">Iber</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        // Köp adamly wideo-baglanyşyk üçin STUN/TURN serwerler
+        // STUN — adaty toruň aňyrsyndakylar üçin ýeterlik
+        // TURN — berk NAT/firewall (kompaniýa, mekdep torlary) aňyrsyndakylar üçin gerek
+        const ICE_SERVERS = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ]
+        };
+
+        const peers = {};        // { socketId: RTCPeerConnection }
+        const remoteNames = {};  // { socketId: userName }
+        let roomId = null;
+
+        const lobbyModal = document.getElementById('lobbyModal');
+        const conferenceRoom = document.getElementById('conferenceRoom');
+        const joinBtn = document.getElementById('joinBtn');
+        
+        const nameInput = document.getElementById('nameInput');
+        const roomInput = document.getElementById('roomInput');
+        const displayNameText = document.getElementById('displayNameText');
+        const roomTitleInfo = document.getElementById('roomTitleInfo');
+
+        const audioSelect = document.getElementById('audioSource');
+        const videoSelect = document.getElementById('videoSource');
+
+        const localVideo = document.getElementById('localVideo');
+        const muteAudioBtn = document.getElementById('muteAudioBtn');
+        const muteVideoBtn = document.getElementById('muteVideoBtn');
+        const raiseHandBtn = document.getElementById('raiseHandBtn');
+        const shareScreenBtn = document.getElementById('shareScreenBtn');
+        const recordBtn = document.getElementById('recordBtn');
+        const handIcon = document.getElementById('handIcon');
+        const videoGrid = document.getElementById('videoGrid');
+
+        let pinnedId = null; // Häzir ulaldylan (spotlight) wideo-gutynyň id-si, ýa-da null
+
+        // Islendik wideo-gutynyň üstüne basanda, ony ulaltmak/kiçeltmek
+        function togglePin(boxId) {
+            const box = document.getElementById(boxId);
+            if (!box) return;
+
+            if (pinnedId === boxId) {
+                box.classList.remove('pinned');
+                videoGrid.classList.remove('spotlight-mode');
+                pinnedId = null;
+            } else {
+                if (pinnedId) {
+                    const prevBox = document.getElementById(pinnedId);
+                    if (prevBox) prevBox.classList.remove('pinned');
+                }
+                box.classList.add('pinned');
+                videoGrid.classList.add('spotlight-mode');
+                pinnedId = boxId;
+            }
+        }
+
+        document.getElementById('localVideoBox').onclick = () => togglePin('localVideoBox');
+
+        // Çat elementleri
+        const chatInput = document.getElementById('chatInput');
+        const sendChatBtn = document.getElementById('sendChatBtn');
+        const chatMessages = document.getElementById('chatMessages');
+
+        let localStream;
+        let screenStream;
+        let isHandRaised = false;
+        let currentUserName = "Men";
+
+        // Otagdaky ähli gatnaşyjylar: { id: { name, audio, video, isLocal } }
+        const participants = {};
+
+        function renderParticipants() {
+            const list = document.getElementById('participantsList');
+            const countEl = document.getElementById('participantCount');
+            const ids = Object.keys(participants);
+            countEl.textContent = ids.length;
+            list.innerHTML = '';
+            ids.forEach(id => {
+                const p = participants[id];
+                const item = document.createElement('div');
+                item.className = 'participant-item';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'participant-name';
+                nameSpan.textContent = p.name + (p.isLocal ? ' (Men)' : '');
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'participant-status';
+                if (!p.audio) {
+                    const badge = document.createElement('span');
+                    badge.className = 'status-badge';
+                    badge.textContent = '🔇';
+                    statusSpan.appendChild(badge);
+                }
+                if (!p.video) {
+                    const badge = document.createElement('span');
+                    badge.className = 'status-badge';
+                    badge.textContent = '🚫📷';
+                    statusSpan.appendChild(badge);
+                }
+
+                item.appendChild(nameSpan);
+                item.appendChild(statusSpan);
+                list.appendChild(item);
+            });
+        }
+
+        function updateRemoteStatusIcons(id, audio, video) {
+            const micIcon = document.querySelector('.micStatus-' + id);
+            const camIcon = document.querySelector('.camStatus-' + id);
+            if (micIcon) micIcon.style.display = audio ? 'none' : 'inline';
+            if (camIcon) camIcon.style.display = video ? 'none' : 'inline';
+        }
+
+        // Enjamlary (Kamera/Mikrofon) Sanawyny Tapmak
+        async function getDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                audioSelect.innerHTML = '';
+                videoSelect.innerHTML = '';
+
+                devices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    if (device.kind === 'audioinput') {
+                        option.textContent = device.label || `Mikrofon ${audioSelect.length + 1}`;
+                        audioSelect.appendChild(option);
+                    } else if (device.kind === 'videoinput') {
+                        option.textContent = device.label || `Kamera ${videoSelect.length + 1}`;
+                        videoSelect.appendChild(option);
+                    }
+                });
+            } catch (err) {
+                console.error("Enjamary alyp bolmady:", err);
+            }
+        }
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+            stream.getTracks().forEach(track => track.stop());
+            getDevices();
+        }).catch(() => {});
+
+        // Otaga Girmek Düwmesi
+        joinBtn.onclick = async () => {
+            const userName = nameInput.value.trim();
+            const roomName = roomInput.value.trim();
+
+            if (!userName) {
+                alert("Häk, adyňyzy ýazmagy unutdyňyz!");
+                return;
+            }
+
+            currentUserName = userName;
+            roomId = roomName;
+            displayNameText.textContent = userName + " (Men)";
+            roomTitleInfo.textContent = "Otag: " + roomName;
+
+            try {
+                const audioId = audioSelect.value;
+                const videoId = videoSelect.value;
+
+                const constraints = {
+                    audio: audioId ? { deviceId: { exact: audioId } } : true,
+                    video: videoId ? { deviceId: { exact: videoId }, width: { ideal: 1280 }, height: { ideal: 720 } } : true
+                };
+
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
+
+                lobbyModal.style.display = 'none';
+                conferenceRoom.style.display = 'block';
+
+                participants['local'] = { name: userName, audio: true, video: true, isLocal: true };
+                renderParticipants();
+
+                socket.emit('join-room', { roomId, userName });
+
+            } catch (error) {
+                console.error("Kamera ýalňyşlygy:", error);
+                alert("Kamera ýa-da mikrofon açylmady!");
+            }
+        };
+
+        // --- Kömekçi funksiýalar: uzakdaky ulanyjynyň wideo-gutusyny döretmek/aýyrmak ---
+        function createRemoteVideoBox(id, name) {
+            if (document.getElementById('videoBox-' + id)) return;
+
+            const box = document.createElement('div');
+            box.className = 'video-box';
+            box.id = 'videoBox-' + id;
+            box.innerHTML = `
+                <video id="video-${id}" autoplay playsinline></video>
+                <span class="pin-hint">🔍 Ulaltmak üçin bas</span>
+                <div class="user-label">
+                    <span class="handIcon-${id}" style="display:none;">✋</span>
+                    <span class="micStatus-${id}" style="display:none;">🔇</span>
+                    <span class="camStatus-${id}" style="display:none;">🚫📷</span>
+                    <span>${name}</span>
+                </div>
+            `;
+            document.getElementById('videoGrid').appendChild(box);
+            box.onclick = () => togglePin('videoBox-' + id);
+
+            // Eger bu ulanyjynyň ses/wideo ýagdaýy eýýäm bize mälim bolsa, ikonalary şoňa görä goý
+            if (participants[id]) {
+                updateRemoteStatusIcons(id, participants[id].audio, participants[id].video);
+            }
+        }
+
+        function removeRemoteVideoBox(id) {
+            const boxId = 'videoBox-' + id;
+            if (pinnedId === boxId) {
+                videoGrid.classList.remove('spotlight-mode');
+                pinnedId = null;
+            }
+            const box = document.getElementById(boxId);
+            if (box) box.remove();
+        }
+
+        // --- Bir uzakdaky ulanyjy üçin RTCPeerConnection döretmek ---
+        function createPeerConnection(id, name) {
+            const pc = new RTCPeerConnection(ICE_SERVERS);
+            peers[id] = pc;
+            remoteNames[id] = name;
+
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', { to: id, candidate: event.candidate });
+                }
+            };
+
+            pc.ontrack = (event) => {
+                createRemoteVideoBox(id, name);
+                const videoEl = document.getElementById('video-' + id);
+                if (videoEl) videoEl.srcObject = event.streams[0];
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                    removeRemoteVideoBox(id);
+                    delete peers[id];
+                }
+            };
+
+            return pc;
+        }
+
+        // --- Otagda öňden bar bolan ulanyjylar: bize teklip (offer) ibermeli ---
+        socket.on('existing-users', async (users) => {
+            for (const user of users) {
+                participants[user.id] = { name: user.name, audio: user.audio, video: user.video, isLocal: false };
+
+                const pc = createPeerConnection(user.id, user.name);
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit('offer', { to: user.id, offer });
+            }
+            renderParticipants();
+        });
+
+        // --- Täze ulanyjy goşulanda, biz garaşýarys (ol bize teklip iberer) ---
+        socket.on('user-joined', ({ id, name, audio, video }) => {
+            participants[id] = { name, audio, video, isLocal: false };
+            createPeerConnection(id, name);
+            renderParticipants();
+        });
+
+        socket.on('offer', async ({ from, offer }) => {
+            const pc = peers[from] || createPeerConnection(from, remoteNames[from] || 'Myhman');
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit('answer', { to: from, answer });
+        });
+
+        socket.on('answer', async ({ from, answer }) => {
+            const pc = peers[from];
+            if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('ice-candidate', async ({ from, candidate }) => {
+            const pc = peers[from];
+            if (pc) {
+                try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+                catch (err) { console.error('ICE goşmak ýalňyşlygy:', err); }
+            }
+        });
+
+        socket.on('user-left', ({ id }) => {
+            if (peers[id]) {
+                peers[id].close();
+                delete peers[id];
+            }
+            delete remoteNames[id];
+            delete participants[id];
+            removeRemoteVideoBox(id);
+            renderParticipants();
+        });
+
+        // --- Beýlekileriň mikrofon/kamera ýagdaýy üýtgände ---
+        socket.on('media-state', ({ id, audio, video }) => {
+            if (participants[id]) {
+                participants[id].audio = audio;
+                participants[id].video = video;
+            }
+            updateRemoteStatusIcons(id, audio, video);
+            renderParticipants();
+        });
+
+        // --- Eliňi götermek: uzakdaky ulanyjylara habar ---
+        socket.on('raise-hand', ({ id, raised }) => {
+            const icon = document.querySelector('.handIcon-' + id);
+            if (icon) icon.style.display = raised ? 'inline' : 'none';
+        });
+
+        // Mikrofon Aç/Öçür
+        muteAudioBtn.onclick = () => {
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                audioTrack.enabled = !audioTrack.enabled;
+                muteAudioBtn.textContent = audioTrack.enabled ? "Mikrofony Öçür" : "Mikrofon Aç";
+                muteAudioBtn.classList.toggle('active', !audioTrack.enabled);
+
+                document.getElementById('localMicStatus').style.display = audioTrack.enabled ? 'none' : 'inline';
+                if (participants['local']) participants['local'].audio = audioTrack.enabled;
+                renderParticipants();
+
+                const videoTrack = localStream.getVideoTracks()[0];
+                socket.emit('media-state', { audio: audioTrack.enabled, video: videoTrack ? videoTrack.enabled : true });
+            }
+        };
+
+        // Kamera Aç/Öçür
+        muteVideoBtn.onclick = () => {
+            const videoTrack = localStream.getVideoTracks()[0];
+            if (videoTrack) {
+                videoTrack.enabled = !videoTrack.enabled;
+                muteVideoBtn.textContent = videoTrack.enabled ? "Kamerany Öçür" : "Kamera Aç";
+                muteVideoBtn.classList.toggle('active', !videoTrack.enabled);
+
+                document.getElementById('localCamStatus').style.display = videoTrack.enabled ? 'none' : 'inline';
+                if (participants['local']) participants['local'].video = videoTrack.enabled;
+                renderParticipants();
+
+                const audioTrack = localStream.getAudioTracks()[0];
+                socket.emit('media-state', { audio: audioTrack ? audioTrack.enabled : true, video: videoTrack.enabled });
+            }
+        };
+
+        // Eliňi Götermek
+        raiseHandBtn.onclick = () => {
+            isHandRaised = !isHandRaised;
+            if (isHandRaised) {
+                handIcon.style.display = 'inline';
+                raiseHandBtn.textContent = "Eliňi Düşür";
+                raiseHandBtn.classList.add('active');
+            } else {
+                handIcon.style.display = 'none';
+                raiseHandBtn.textContent = "✋ Eliňi Göter";
+                raiseHandBtn.classList.remove('active');
+            }
+            socket.emit('raise-hand', { raised: isHandRaised });
+        };
+
+        // Ekran Paýlaşmak (Screen Sharing)
+        shareScreenBtn.onclick = async () => {
+            if (screenStream) {
+                // Eger eýýäm ekran paýlaşylýan bolsa, ony sakla we kamera gaýt
+                stopScreenSharing();
+            } else {
+                try {
+                    // Brauzerden ekrany ýa-da programmany paýlaşmaga rugsat soramak
+                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    
+                    // Biziň görýän wideomyzy ekrana çalyşmak
+                    localVideo.srcObject = screenStream;
+
+                    // Ähli baglanan ulanyjylara-da ekran wideosyny ibermek
+                    const screenTrack = screenStream.getVideoTracks()[0];
+                    Object.values(peers).forEach(pc => {
+                        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                        if (sender) sender.replaceTrack(screenTrack);
+                    });
+                    
+                    shareScreenBtn.textContent = "Ekran Paýlaşmagy Bes Et";
+                    shareScreenBtn.classList.add('sharing');
+
+                    // Eger ulanyjy brauzeriň öz düwmesinden "Stop sharing" bassa
+                    screenTrack.onended = stopScreenSharing;
+
+                } catch (error) {
+                    console.error("Ekran paýlaşmak ýalňyşlygy:", error);
+                }
+            }
+        };
+
+        function stopScreenSharing() {
+            if (screenStream) {
+                screenStream.getTracks().forEach(track => track.stop());
+            }
+            // Täzeden öz wideo kameramyza (localStream) gaýdýarys
+            localVideo.srcObject = localStream;
+
+            // Ähli peer-lere-de kamera yzyna gaýtarylsyn
+            const cameraTrack = localStream.getVideoTracks()[0];
+            if (cameraTrack) {
+                Object.values(peers).forEach(pc => {
+                    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(cameraTrack);
+                });
+            }
+
+            shareScreenBtn.textContent = "🖥️ Ekran Paýlaş";
+            shareScreenBtn.classList.remove('sharing');
+            screenStream = null;
+        }
+
+        // Söhbetdeşligi Ýazgy Etmek
+        // Ekranda görünýän zady (wideolar, çat) sesi bilen bilelikde ýazgy edip, faýl hökmünde ýükleýär.
+        let mediaRecorder;
+        let recordedChunks = [];
+        let recordStream;
+
+        recordBtn.onclick = async () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                return;
+            }
+
+            try {
+                // Ulanyjydan haýsy ekrany/tab-y ýazgy etjekdigini soraýar
+                recordStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                recordedChunks = [];
+
+                mediaRecorder = new MediaRecorder(recordStream, { mimeType: 'video/webm' });
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) recordedChunks.push(e.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const now = new Date();
+                    const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+                    a.download = `sanly-konferensiya-${stamp}.webm`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    recordStream.getTracks().forEach(track => track.stop());
+                    recordBtn.textContent = "⏺️ Ýazgy Başla";
+                    recordBtn.classList.remove('active');
+                };
+
+                mediaRecorder.start();
+                recordBtn.textContent = "⏹️ Ýazgyny Bes Et";
+                recordBtn.classList.add('active');
+
+                // Ulanyjy brauzeriň öz "Stop sharing" düwmesini bassa, ýazgy hem awtomatik gutarýar
+                recordStream.getVideoTracks()[0].onended = () => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                };
+
+            } catch (error) {
+                console.error("Ýazgy alyş ýalňyşlygy:", error);
+            }
+        };
+
+        // Çat Hatyny Ibermek (serwer arkaly ähli otagdakylara ýaýraýar)
+        function sendChatMessage() {
+            const text = chatInput.value.trim();
+            if (text !== "") {
+                socket.emit('chat-message', { text });
+                chatInput.value = "";
+            }
+        }
+
+        // Gelen çat hatyny görkezmek (öz hatymyz hem şu ýerden gelýär)
+        socket.on('chat-message', ({ senderName, text }) => {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'chat-message';
+
+            const senderDiv = document.createElement('div');
+            senderDiv.className = 'sender';
+            senderDiv.textContent = senderName;
+
+            const textNode = document.createTextNode(text);
+
+            messageDiv.appendChild(senderDiv);
+            messageDiv.appendChild(textNode);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+
+        sendChatBtn.onclick = sendChatMessage;
+        chatInput.onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                sendChatMessage();
+            }
+        };
+    </script>
+
+</body>
+</html>
