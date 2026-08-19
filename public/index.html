@@ -17,6 +17,48 @@
             border: 1px solid #444;
         }
         #lobbyModal h2 { margin-bottom: 20px; color: #2d8cff; text-align: center; }
+
+        /* Duşuşyk Meýilleşdirmek Bölümi */
+        .schedule-section {
+            max-width: 400px;
+            margin: 20px auto 0;
+            background: #252525;
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #444;
+        }
+        .schedule-section h3 { color: #2d8cff; font-size: 16px; margin-top: 0; margin-bottom: 15px; text-align: center; }
+        .schedule-toggle-btn {
+            width: 100%;
+            background: none;
+            border: 1px solid #2d8cff;
+            color: #2d8cff;
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .schedule-toggle-btn:hover { background: rgba(45,140,255,0.1); }
+        #scheduleForm { margin-top: 15px; display: none; }
+        .meeting-item {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .meeting-item .meeting-title { font-weight: bold; color: white; margin-bottom: 4px; }
+        .meeting-item .meeting-meta { font-size: 13px; color: #999; margin-bottom: 8px; }
+        .meeting-item .join-meeting-btn {
+            background: #2d8cff;
+            border: none;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .no-meetings { color: #888; font-size: 14px; text-align: center; padding: 10px 0; }
         .input-group { margin-bottom: 15px; text-align: left; }
         .input-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #bbb; }
         .input-group input, .input-group select {
@@ -291,6 +333,28 @@
             <select id="videoSource"></select>
         </div>
         <button class="primary-btn" id="joinBtn">Otaga Gir</button>
+    </div>
+
+    <!-- Duşuşyk Meýilleşdirmek Bölümi -->
+    <div class="schedule-section">
+        <h3>📅 Duşuşyklar</h3>
+        <button type="button" class="schedule-toggle-btn" id="scheduleToggleBtn">+ Täze Duşuşyk Meýilleşdir</button>
+        <div id="scheduleForm">
+            <div class="input-group">
+                <label>Duşuşygyň Ady:</label>
+                <input type="text" id="meetingTitleInput" placeholder="Hepdelik ýygnak...">
+            </div>
+            <div class="input-group">
+                <label>Sene:</label>
+                <input type="date" id="meetingDateInput">
+            </div>
+            <div class="input-group">
+                <label>Wagt:</label>
+                <input type="time" id="meetingTimeInput">
+            </div>
+            <button type="button" class="primary-btn" id="createMeetingBtn">Meýilleşdir</button>
+        </div>
+        <div id="meetingsList" style="margin-top: 15px;"></div>
     </div>
 
     <!-- Konferensiýa Esasy Otagy we Çat -->
@@ -874,6 +938,101 @@
                 sendChatMessage();
             }
         };
+
+        // --- Duşuşyk Meýilleşdirmek ---
+        const scheduleToggleBtn = document.getElementById('scheduleToggleBtn');
+        const scheduleForm = document.getElementById('scheduleForm');
+        const meetingsList = document.getElementById('meetingsList');
+
+        scheduleToggleBtn.onclick = () => {
+            const isHidden = scheduleForm.style.display !== 'block';
+            scheduleForm.style.display = isHidden ? 'block' : 'none';
+            scheduleToggleBtn.textContent = isHidden ? '– Ýap' : '+ Täze Duşuşyk Meýilleşdir';
+        };
+
+        async function loadMeetings() {
+            try {
+                const res = await fetch('/api/meetings');
+                const meetings = await res.json();
+                renderMeetings(meetings);
+            } catch (err) {
+                meetingsList.innerHTML = '';
+                const msg = document.createElement('div');
+                msg.className = 'no-meetings';
+                msg.textContent = 'Duşuşyklar ýüklenip bilmedi';
+                meetingsList.appendChild(msg);
+            }
+        }
+
+        function renderMeetings(meetings) {
+            meetingsList.innerHTML = '';
+            if (!meetings || meetings.length === 0) {
+                const msg = document.createElement('div');
+                msg.className = 'no-meetings';
+                msg.textContent = 'Entek meýilleşdirilen duşuşyk ýok';
+                meetingsList.appendChild(msg);
+                return;
+            }
+            meetings.forEach(m => {
+                const item = document.createElement('div');
+                item.className = 'meeting-item';
+
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'meeting-title';
+                titleDiv.textContent = m.title;
+
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'meeting-meta';
+                metaDiv.textContent = `${m.date} — ${m.time} · Guraýjy: ${m.organizerName} · Otag: ${m.roomId}`;
+
+                const useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.className = 'join-meeting-btn';
+                useBtn.textContent = 'Bu otaga gir';
+                useBtn.onclick = () => {
+                    document.getElementById('roomInput').value = m.roomId;
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+
+                item.appendChild(titleDiv);
+                item.appendChild(metaDiv);
+                item.appendChild(useBtn);
+                meetingsList.appendChild(item);
+            });
+        }
+
+        document.getElementById('createMeetingBtn').onclick = async () => {
+            const title = document.getElementById('meetingTitleInput').value.trim();
+            const date = document.getElementById('meetingDateInput').value;
+            const time = document.getElementById('meetingTimeInput').value;
+            const organizerName = document.getElementById('nameInput').value.trim() || 'Näbelli';
+            const roomId = 'otag-' + Math.random().toString(36).substring(2, 8);
+
+            if (!title || !date || !time) {
+                alert('Duşuşygyň adyny, senesini we wagtyny dolduryň');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/meetings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, roomId, date, time, organizerName })
+                });
+                if (!res.ok) throw new Error('failed');
+
+                document.getElementById('meetingTitleInput').value = '';
+                document.getElementById('meetingDateInput').value = '';
+                document.getElementById('meetingTimeInput').value = '';
+                scheduleForm.style.display = 'none';
+                scheduleToggleBtn.textContent = '+ Täze Duşuşyk Meýilleşdir';
+                loadMeetings();
+            } catch (err) {
+                alert('Duşuşyk döredilip bilmedi. Internet baglanyşygyny barlaň.');
+            }
+        };
+
+        loadMeetings();
     </script>
 
 </body>
