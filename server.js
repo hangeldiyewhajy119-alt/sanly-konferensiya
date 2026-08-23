@@ -7,7 +7,39 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---- Duşuşyklary Meýilleşdirmek (API) ----
+// Duşuşyklar serweriň hakydasynda (memory) saklanýar.
+// Serwer gaýtadan başlansa (Render "uklap" täzeden ukusyz bolanda ýa-da deploý edilende) ýatdan çykar.
+let meetings = [];
+
+// Ähli meýilleşdirilen duşuşyklaryň sanawyny almak
+app.get('/api/meetings', (req, res) => {
+    res.json(meetings);
+});
+
+// Täze duşuşyk meýilleşdirmek
+app.post('/api/meetings', (req, res) => {
+    const { title, roomId, date, time, organizerName } = req.body || {};
+
+    if (!title || !roomId || !date || !time) {
+        return res.status(400).json({ error: 'Maglumatlar doly däl' });
+    }
+
+    const newMeeting = {
+        id: Date.now().toString(),
+        title,
+        roomId,
+        date,
+        time,
+        organizerName: organizerName || 'Näbelli'
+    };
+
+    meetings.push(newMeeting);
+    res.status(201).json(newMeeting);
+});
 
 // Otaglaryň içindäki ulanyjylary ýatda saklamak: { roomId: { socketId: { name, audio, video } } }
 const rooms = {};
