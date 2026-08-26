@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const { MongoClient } = require('mongodb');
 
 const app = express();
 const server = http.createServer(app);
@@ -10,35 +11,75 @@ const io = new Server(server);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---- MongoDB baglanyşygy ----
+const MONGODB_URI = process.env.MONGODB_URI;
+let meetingsCollection = null;
+
+async function connectDB() {
+    if (!MONGODB_URI) {
+        console.log('MONGODB_URI environment variable tapylmady — duşuşyklar hakydada (memory) saklanar.');
+        return;
+    }
+    try {
+        const client = new MongoClient(MONGODB_URI);
+        await client.connect();
+        const db = client.db('sanly_konferensiya');
+        meetingsCollection = db.collection('meetings');
+        console.log('MongoDB-e üstünlikli baglanyldy.');
+    } catch (err) {
+        console.error('MongoDB baglanyşyk ýalňyşlygy:', err.message);
+    }
+}
+connectDB();
+
+// Eger MongoDB elýeterli bolmasa, ätiýaçlyk hökmünde hakydada saklamak
+let meetingsMemory = [];
+
 // ---- Duşuşyklary Meýilleşdirmek (API) ----
-// Duşuşyklar serweriň hakydasynda (memory) saklanýar.
-// Serwer gaýtadan başlansa (Render "uklap" täzeden ukusyz bolanda ýa-da deploý edilende) ýatdan çykar.
-let meetings = [];
 
 // Ähli meýilleşdirilen duşuşyklaryň sanawyny almak
-app.get('/api/meetings', (req, res) => {
-    res.json(meetings);
+app.get('/api/meetings', async (req, res) => {
+    try {
+        if (meetingsCollection) {
+            const meetings = await meetingsCollection.find({}).sort({ _id: -1 }).toArray();
+            return res.json(meetings);
+        }
+        res.json(meetingsMemory);
+    } catch (err) {
+        console.error('Duşuşyklary almakda ýalňyşlyk:', err.message);
+        res.status(500).json({ error: 'Duşuşyklar ýüklenip bilmedi' });
+    }
 });
 
 // Täze duşuşyk meýilleşdirmek
-app.post('/api/meetings', (req, res) => {
-    const { title, roomId, date, time, organizerName } = req.body || {};
+app.post('/api/meetings', async (req, res) => {
+    try {
+        const { title, roomId, date, time, organizerName } = req.body || {};
 
-    if (!title || !roomId || !date || !time) {
-        return res.status(400).json({ error: 'Maglumatlar doly däl' });
+        if (!title || !roomId || !date || !time) {
+            return res.status(400).json({ error: 'Maglumatlar doly däl' });
+        }
+
+        const newMeeting = {
+            id: Date.now().toString(),
+            title,
+            roomId,
+            date,
+            time,
+            organizerName: organizerName || 'Näbelli'
+        };
+
+        if (meetingsCollection) {
+            await meetingsCollection.insertOne(newMeeting);
+        } else {
+            meetingsMemory.push(newMeeting);
+        }
+
+        res.status(201).json(newMeeting);
+    } catch (err) {
+        console.error('Duşuşyk döretmekde ýalňyşlyk:', err.message);
+        res.status(500).json({ error: 'Duşuşyk döredilip bilmedi' });
     }
-
-    const newMeeting = {
-        id: Date.now().toString(),
-        title,
-        roomId,
-        date,
-        time,
-        organizerName: organizerName || 'Näbelli'
-    };
-
-    meetings.push(newMeeting);
-    res.status(201).json(newMeeting);
 });
 
 // Otaglaryň içindäki ulanyjylary ýatda saklamak: { roomId: { socketId: { name, audio, video } } }
