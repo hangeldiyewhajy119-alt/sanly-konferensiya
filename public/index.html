@@ -309,16 +309,79 @@
         #recordBtn { background: #6f2dff; border-color: #6f2dff; }
         #recordBtn:hover { background: #5620cc; }
         #recordBtn.active { background: #e81123; border-color: #e81123; }
+
+        /* Giriş / Hasaba Alyş (Auth) Paneli */
+        #authModal {
+            max-width: 400px;
+            margin: 80px auto;
+            background: #252525;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+            border: 1px solid #444;
+        }
+        #authModal h2 { margin-bottom: 20px; color: #2d8cff; text-align: center; }
+        .auth-error {
+            color: #ff6b6b;
+            font-size: 13px;
+            margin-bottom: 12px;
+            text-align: center;
+            display: none;
+        }
+        .auth-switch {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
+            color: #bbb;
+        }
+        .auth-switch a { color: #2d8cff; cursor: pointer; text-decoration: underline; }
+
+        .user-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-bar .user-name-tag {
+            font-size: 14px;
+            color: #bbb;
+        }
     </style>
 </head>
 <body>
 
+    <!-- Giriş / Hasaba Alyş (Auth) Paneli -->
+    <div id="authModal">
+        <h2 id="authTitle">Hasaba Giriş</h2>
+        <div class="auth-error" id="authError"></div>
+
+        <div id="registerNameGroup" class="input-group" style="display:none;">
+            <label>Adyňyz we Familiýaňyz:</label>
+            <input type="text" id="regNameInput" placeholder="Hajymuhammet...">
+        </div>
+        <div class="input-group">
+            <label>Email:</label>
+            <input type="email" id="authEmailInput" placeholder="ada@mysal.com">
+        </div>
+        <div class="input-group">
+            <label>Parol:</label>
+            <input type="password" id="authPasswordInput" placeholder="Azyndan 6 harp">
+        </div>
+        <button class="primary-btn" id="authSubmitBtn">Giriş Et</button>
+        <div class="auth-switch">
+            <span id="authSwitchText">Hasabyňyz ýokmy?</span>
+            <a id="authSwitchLink">Hasaba durmak</a>
+        </div>
+    </div>
+
     <!-- Giriş (Lobby) Paneli -->
-    <div id="lobbyModal">
+    <div id="lobbyModal" style="display:none;">
         <h2>Sanly Konferensiýa</h2>
+        <div style="text-align:right; margin-bottom:10px;">
+            <a id="lobbyLogoutLink" style="color:#2d8cff; cursor:pointer; font-size:13px; text-decoration:underline;">Çykyş</a>
+        </div>
         <div class="input-group">
             <label>Adyňyz we Familiýaňyz:</label>
-            <input type="text" id="nameInput" placeholder="Hajymuhammet...">
+            <input type="text" id="nameInput" placeholder="Hajymuhammet..." readonly>
         </div>
         <div class="input-group">
             <label>Otag Belgisi (Room ID):</label>
@@ -336,7 +399,7 @@
     </div>
 
     <!-- Duşuşyk Meýilleşdirmek Bölümi -->
-    <div class="schedule-section">
+    <div class="schedule-section" id="scheduleSection" style="display:none;">
         <h3>📅 Duşuşyklar</h3>
         <button type="button" class="schedule-toggle-btn" id="scheduleToggleBtn">+ Täze Duşuşyk Meýilleşdir</button>
         <div id="scheduleForm">
@@ -361,7 +424,10 @@
     <div id="conferenceRoom">
         <div class="header-info">
             <span id="roomTitleInfo">Otag: halkara-otag-1</span>
-            <button onclick="location.reload()" style="background: #e81123; border:none;">Otagdan Çyk</button>
+            <div class="user-bar">
+                <span class="user-name-tag" id="loggedInUserTag"></span>
+                <button onclick="location.reload()" style="background: #e81123; border:none;">Otagdan Çyk</button>
+            </div>
         </div>
 
         <div class="main-layout">
@@ -410,6 +476,109 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // ---- Ulanyjy Hasaby (Login / Registration) ----
+        const authModal = document.getElementById('authModal');
+        const authTitle = document.getElementById('authTitle');
+        const authError = document.getElementById('authError');
+        const authEmailInput = document.getElementById('authEmailInput');
+        const authPasswordInput = document.getElementById('authPasswordInput');
+        const regNameInput = document.getElementById('regNameInput');
+        const registerNameGroup = document.getElementById('registerNameGroup');
+        const authSubmitBtn = document.getElementById('authSubmitBtn');
+        const authSwitchText = document.getElementById('authSwitchText');
+        const authSwitchLink = document.getElementById('authSwitchLink');
+
+        let authMode = 'login'; // 'login' ýa-da 'register'
+
+        function setAuthMode(mode) {
+            authMode = mode;
+            authError.style.display = 'none';
+            if (mode === 'login') {
+                authTitle.textContent = 'Hasaba Giriş';
+                registerNameGroup.style.display = 'none';
+                authSubmitBtn.textContent = 'Giriş Et';
+                authSwitchText.textContent = 'Hasabyňyz ýokmy?';
+                authSwitchLink.textContent = 'Hasaba durmak';
+            } else {
+                authTitle.textContent = 'Täze Hasap Açmak';
+                registerNameGroup.style.display = 'block';
+                authSubmitBtn.textContent = 'Hasaba Dur';
+                authSwitchText.textContent = 'Hasabyňyz barmy?';
+                authSwitchLink.textContent = 'Giriş etmek';
+            }
+        }
+        authSwitchLink.onclick = () => setAuthMode(authMode === 'login' ? 'register' : 'login');
+
+        function showApp(user) {
+            authModal.style.display = 'none';
+            document.getElementById('lobbyModal').style.display = 'block';
+            document.getElementById('scheduleSection').style.display = 'block';
+            document.getElementById('nameInput').value = user.name;
+            document.getElementById('loggedInUserTag').textContent = '👤 ' + user.name;
+        }
+
+        function showAuthError(message) {
+            authError.textContent = message;
+            authError.style.display = 'block';
+        }
+
+        authSubmitBtn.onclick = async () => {
+            const email = authEmailInput.value.trim();
+            const password = authPasswordInput.value;
+
+            if (!email || !password) {
+                showAuthError('Email we paroly giriziň');
+                return;
+            }
+
+            const endpoint = authMode === 'login' ? '/api/login' : '/api/register';
+            const body = authMode === 'login'
+                ? { email, password }
+                : { name: regNameInput.value.trim(), email, password };
+
+            if (authMode === 'register' && !body.name) {
+                showAuthError('Adyňyzy giriziň');
+                return;
+            }
+
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showAuthError(data.error || 'Ýalňyşlyk ýüze çykdy');
+                    return;
+                }
+                localStorage.setItem('sk_token', data.token);
+                localStorage.setItem('sk_user', JSON.stringify(data.user));
+                showApp(data.user);
+            } catch (err) {
+                showAuthError('Serwer bilen baglanyşyk ýok. Internet baglanyşygyny barlaň.');
+            }
+        };
+
+        document.getElementById('lobbyLogoutLink').onclick = () => {
+            localStorage.removeItem('sk_token');
+            localStorage.removeItem('sk_user');
+            location.reload();
+        };
+
+        // Sahypa açylanda, öň giren bolsa awtomatik giriş
+        (function checkExistingLogin() {
+            const token = localStorage.getItem('sk_token');
+            const userRaw = localStorage.getItem('sk_user');
+            if (token && userRaw) {
+                showApp(JSON.parse(userRaw));
+            } else {
+                setAuthMode('login');
+            }
+        })();
+    </script>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
@@ -1005,7 +1174,8 @@
             const title = document.getElementById('meetingTitleInput').value.trim();
             const date = document.getElementById('meetingDateInput').value;
             const time = document.getElementById('meetingTimeInput').value;
-            const organizerName = document.getElementById('nameInput').value.trim() || 'Näbelli';
+            const storedUser = JSON.parse(localStorage.getItem('sk_user') || '{}');
+            const organizerName = storedUser.name || document.getElementById('nameInput').value.trim() || 'Näbelli';
             const roomId = 'otag-' + Math.random().toString(36).substring(2, 8);
 
             if (!title || !date || !time) {
