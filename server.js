@@ -3,6 +3,8 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
 const { MongoClient } = require('mongodb');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,7 +15,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- MongoDB baglanyşygy ----
 const MONGODB_URI = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET || 'sanly-konferensiya-gizlin-acar-2026';
+
 let meetingsCollection = null;
+let usersCollection = null;
 
 async function connectDB() {
     if (!MONGODB_URI) {
@@ -25,6 +30,8 @@ async function connectDB() {
         await client.connect();
         const db = client.db('sanly_konferensiya');
         meetingsCollection = db.collection('meetings');
+        usersCollection = db.collection('users');
+        await usersCollection.createIndex({ email: 1 }, { unique: true });
         console.log('MongoDB-e üstünlikli baglanyldy.');
     } catch (err) {
         console.error('MongoDB baglanyşyk ýalňyşlygy:', err.message);
@@ -34,6 +41,102 @@ connectDB();
 
 // Eger MongoDB elýeterli bolmasa, ätiýaçlyk hökmünde hakydada saklamak
 let meetingsMemory = [];
+
+// ---- Ulanyjy Barlagy (Auth Middleware) ----
+function authMiddleware(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Giriş talap edilýär' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+        req.user = jwt.verify(token, JWT_SECRET);
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Nädogry ýa-da möhleti geçen giriş' });
+    }
+}
+
+// ---- Hasaba Durmak (Register) ----
+app.post('/api/register', async (req, res) => {
+    try {
+        const { name, email, password } = req.body || {};
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: 'Ähli meýdanlary dolduryň' });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Parol azyndan 6 harp bolmaly' });
+        }
+        if (!usersCollection) {
+            return res.status(503).json({ error: 'Ulgam wagtlaýyn elýeterli däl. Birazdan täzeden synanyşyň.' });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const existing = await usersCollection.findOne({ email: normalizedEmail });
+        if (existing) {
+            return res.status(409).json({ error: 'Bu email bilen eýýäm hasap bar' });
+        }
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        const result = await usersCollection.insertOne({
+            name,
+            email: normalizedEmail,
+            passwordHash,
+            createdAt: new Date()
+        });
+
+        const token = jwt.sign(
+            { id: result.insertedId.toString(), name, email: normalizedEmail },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+        res.status(201).json({ token, user: { name, email: normalizedEmail } });
+    } catch (err) {
+        console.error('Registrasiýa ýalňyşlygy:', err.message);
+        res.status(500).json({ error: 'Hasap döredilip bilmedi' });
+    }
+});
+
+// ---- Giriş (Login) ----
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password } = req.body || {};
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email we paroly giriziň' });
+        }
+        if (!usersCollection) {
+            return res.status(503).json({ error: 'Ulgam wagtlaýyn elýeterli däl. Birazdan täzeden synanyşyň.' });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await usersCollection.findOne({ email: normalizedEmail });
+        if (!user) {
+            return res.status(401).json({ error: 'Email ýa-da parol nädogry' });
+        }
+
+        const match = await bcrypt.compare(password, user.passwordHash);
+        if (!match) {
+            return res.status(401).json({ error: 'Email ýa-da parol nädogry' });
+        }
+
+        const token = jwt.sign(
+            { id: user._id.toString(), name: user.name, email: user.email },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+        res.json({ token, user: { name: user.name, email: user.email } });
+    } catch (err) {
+        console.error('Giriş ýalňyşlygy:', err.message);
+        res.status(500).json({ error: 'Giriş edip bolmady' });
+    }
+});
+
+// ---- Häzirki Ulanyjy (Me) ----
+app.get('/api/me', authMiddleware, (req, res) => {
+    res.json({ user: { name: req.user.name, email: req.user.email } });
+});
 
 // ---- Duşuşyklary Meýilleşdirmek (API) ----
 
