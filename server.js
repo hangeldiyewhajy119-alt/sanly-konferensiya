@@ -1,8 +1,9 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -10,7 +11,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.json());
+app.use(express.json({ limit: '3mb' })); // suratlar (avatar) üçin ýokarlandyrylan limit
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- MongoDB baglanyşygy ----
@@ -19,6 +20,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'sanly-konferensiya-gizlin-acar-202
 
 let meetingsCollection = null;
 let usersCollection = null;
+let historyCollection = null;
+let messagesCollection = null;
 
 async function connectDB() {
     if (!MONGODB_URI) {
@@ -31,6 +34,8 @@ async function connectDB() {
         const db = client.db('sanly_konferensiya');
         meetingsCollection = db.collection('meetings');
         usersCollection = db.collection('users');
+        historyCollection = db.collection('history');
+        messagesCollection = db.collection('messages');
         await usersCollection.createIndex({ email: 1 }, { unique: true });
         console.log('MongoDB-e üstünlikli baglanyldy.');
     } catch (err) {
@@ -41,6 +46,20 @@ connectDB();
 
 // Eger MongoDB elýeterli bolmasa, ätiýaçlyk hökmünde hakydada saklamak
 let meetingsMemory = [];
+
+function makePermanentRoomId() {
+    return 'otag-' + crypto.randomBytes(4).toString('hex');
+}
+
+function publicUser(u) {
+    return {
+        id: u._id.toString(),
+        name: u.name,
+        email: u.email,
+        avatar: u.avatar || null,
+        permanentRoomId: u.permanentRoomId
+    };
+}
 
 // ---- Ulanyjy Barlagy (Auth Middleware) ----
 function authMiddleware(req, res, next) {
@@ -79,19 +98,23 @@ app.post('/api/register', async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(password, 10);
+        const permanentRoomId = makePermanentRoomId();
         const result = await usersCollection.insertOne({
             name,
             email: normalizedEmail,
             passwordHash,
+            avatar: null,
+            permanentRoomId,
             createdAt: new Date()
         });
 
+        const userDoc = { _id: result.insertedId, name, email: normalizedEmail, avatar: null, permanentRoomId };
         const token = jwt.sign(
             { id: result.insertedId.toString(), name, email: normalizedEmail },
             JWT_SECRET,
             { expiresIn: '30d' }
         );
-        res.status(201).json({ token, user: { name, email: normalizedEmail } });
+        res.status(201).json({ token, user: publicUser(userDoc) });
     } catch (err) {
         console.error('Registrasiýa ýalňyşlygy:', err.message);
         res.status(500).json({ error: 'Hasap döredilip bilmedi' });
@@ -121,12 +144,18 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Email ýa-da parol nädogry' });
         }
 
+        // Köne hasaplarda hemişelik otag ýok bolsa, häzir dörediň
+        if (!user.permanentRoomId) {
+            user.permanentRoomId = makePermanentRoomId();
+            await usersCollection.updateOne({ _id: user._id }, { $set: { permanentRoomId: user.permanentRoomId } });
+        }
+
         const token = jwt.sign(
             { id: user._id.toString(), name: user.name, email: user.email },
             JWT_SECRET,
             { expiresIn: '30d' }
         );
-        res.json({ token, user: { name: user.name, email: user.email } });
+        res.json({ token, user: publicUser(user) });
     } catch (err) {
         console.error('Giriş ýalňyşlygy:', err.message);
         res.status(500).json({ error: 'Giriş edip bolmady' });
@@ -134,13 +163,105 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ---- Häzirki Ulanyjy (Me) ----
-app.get('/api/me', authMiddleware, (req, res) => {
-    res.json({ user: { name: req.user.name, email: req.user.email } });
+app.get('/api/me', authMiddleware, async (req, res) => {
+    try {
+        if (!usersCollection) return res.status(503).json({ error: 'Ulgam wagtlaýyn elýeterli däl' });
+        const user = await usersCollection.findOne({ _id: new ObjectId(req.user.id) });
+        if (!user) return res.status(404).json({ error: 'Ulanyjy tapylmady' });
+        res.json({ user: publicUser(user) });
+    } catch (err) {
+        res.status(500).json({ error: 'Maglumat alnyp bilmedi' });
+    }
+});
+
+// ---- Profili Täzelemek (at we/ýa-da surat) ----
+app.put('/api/profile', authMiddleware, async (req, res) => {
+    try {
+        if (!usersCollection) return res.status(503).json({ error: 'Ulgam wagtlaýyn elýeterli däl' });
+        const { name, avatar } = req.body || {};
+        const update = {};
+        if (typeof name === 'string' && name.trim()) update.name = name.trim();
+        if (typeof avatar === 'string') update.avatar = avatar; // base64 data URL
+
+        if (Object.keys(update).length === 0) {
+            return res.status(400).json({ error: 'Üýtgetjek zadyňyzy giriziň' });
+        }
+
+        await usersCollection.updateOne({ _id: new ObjectId(req.user.id) }, { $set: update });
+        const user = await usersCollection.findOne({ _id: new ObjectId(req.user.id) });
+        res.json({ user: publicUser(user) });
+    } catch (err) {
+        console.error('Profil täzelemek ýalňyşlygy:', err.message);
+        res.status(500).json({ error: 'Profil täzelenip bilmedi' });
+    }
+});
+
+// ---- Duşuşyk Taryhy ----
+app.post('/api/history', authMiddleware, async (req, res) => {
+    try {
+        if (!historyCollection) return res.status(503).json({ error: 'Ulgam wagtlaýyn elýeterli däl' });
+        const { roomId } = req.body || {};
+        if (!roomId) return res.status(400).json({ error: 'roomId gerek' });
+
+        await historyCollection.insertOne({
+            userId: req.user.id,
+            roomId,
+            joinedAt: new Date()
+        });
+        res.status(201).json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Taryh ýazylyp bilmedi' });
+    }
+});
+
+app.get('/api/history', authMiddleware, async (req, res) => {
+    try {
+        if (!historyCollection) return res.json([]);
+        const items = await historyCollection
+            .find({ userId: req.user.id })
+            .sort({ joinedAt: -1 })
+            .limit(50)
+            .toArray();
+        res.json(items);
+    } catch (err) {
+        res.status(500).json({ error: 'Taryh alnyp bilmedi' });
+    }
+});
+
+// ---- Ulanyjylaryň Sanawy (Habarlaşmak üçin) ----
+app.get('/api/users', authMiddleware, async (req, res) => {
+    try {
+        if (!usersCollection) return res.json([]);
+        const users = await usersCollection
+            .find({ _id: { $ne: new ObjectId(req.user.id) } })
+            .project({ passwordHash: 0 })
+            .toArray();
+        res.json(users.map(publicUser));
+    } catch (err) {
+        res.status(500).json({ error: 'Ulanyjylar alnyp bilmedi' });
+    }
+});
+
+// ---- Iki ulanyjynyň arasyndaky habarlar taryhy ----
+app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
+    try {
+        if (!messagesCollection) return res.json([]);
+        const myId = req.user.id;
+        const otherId = req.params.userId;
+        const messages = await messagesCollection.find({
+            $or: [
+                { fromUserId: myId, toUserId: otherId },
+                { fromUserId: otherId, toUserId: myId }
+            ]
+        }).sort({ createdAt: 1 }).limit(200).toArray();
+        res.json(messages);
+    } catch (err) {
+        res.status(500).json({ error: 'Habarlar alnyp bilmedi' });
+    }
 });
 
 // ---- Duşuşyklary Meýilleşdirmek (API) ----
 
-// Ähli meýilleşdirilen duşuşyklaryň sanawyny almak
 app.get('/api/meetings', async (req, res) => {
     try {
         if (meetingsCollection) {
@@ -154,7 +275,6 @@ app.get('/api/meetings', async (req, res) => {
     }
 });
 
-// Täze duşuşyk meýilleşdirmek
 app.post('/api/meetings', async (req, res) => {
     try {
         const { title, roomId, date, time, organizerName } = req.body || {};
@@ -191,9 +311,37 @@ const rooms = {};
 io.on('connection', (socket) => {
     let currentRoom = null;
     let currentUserName = null;
+    socket.userId = null; // giren ulanyjynyň hasap ID-si (bar bolsa)
+
+    // Ulanyjyny giren hasaby bilen baglanyşdyrmak (habarlaşmak we taryh üçin)
+    socket.on('authenticate', (token) => {
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            socket.userId = decoded.id;
+            socket.join('user-' + decoded.id);
+        } catch (err) {
+            // token nädogry bolsa, ünsi almaýarys — anon hökmünde dowam edýär
+        }
+    });
+
+    // Şahsy Habarlaşma (Messaging)
+    socket.on('send-dm', async ({ toUserId, text }) => {
+        if (!socket.userId || !text || !toUserId) return;
+        const message = {
+            fromUserId: socket.userId,
+            toUserId,
+            text,
+            createdAt: new Date()
+        };
+        if (messagesCollection) {
+            await messagesCollection.insertOne(message);
+        }
+        io.to('user-' + toUserId).emit('receive-dm', message);
+        socket.emit('receive-dm', message); // iberijiniň öz ekranynda-da görünsin
+    });
 
     // Ulanyjy otaga girende
-    socket.on('join-room', ({ roomId, userName }) => {
+    socket.on('join-room', async ({ roomId, userName }) => {
         currentRoom = roomId;
         currentUserName = userName;
 
@@ -201,18 +349,24 @@ io.on('connection', (socket) => {
 
         if (!rooms[roomId]) rooms[roomId] = {};
 
-        // Otagda öňden bar bolan ulanyjylaryň sanawyny (at + ses/wideo ýagdaýy) täze goşulan adama ibermek
         const existingUsers = Object.entries(rooms[roomId]).map(([id, info]) => ({
             id, name: info.name, audio: info.audio, video: info.video
         }));
         socket.emit('existing-users', existingUsers);
 
-        // Täze ulanyjyny otagdaky beýlekilere habar bermek (başlangyçda mikrofon/kamera açyk hasaplanýar)
         rooms[roomId][socket.id] = { name: userName, audio: true, video: true };
         socket.to(roomId).emit('user-joined', { id: socket.id, name: userName, audio: true, video: true });
+
+        // Giren hasaby üçin duşuşyk taryhyny ýazmak
+        if (socket.userId && historyCollection) {
+            try {
+                await historyCollection.insertOne({ userId: socket.userId, roomId, joinedAt: new Date() });
+            } catch (err) {
+                console.error('Taryh ýazmak ýalňyşlygy:', err.message);
+            }
+        }
     });
 
-    // WebRTC signal alyş-çalyşy (offer / answer / ice-candidate)
     socket.on('offer', ({ to, offer }) => {
         io.to(to).emit('offer', { from: socket.id, offer });
     });
@@ -225,7 +379,6 @@ io.on('connection', (socket) => {
         io.to(to).emit('ice-candidate', { from: socket.id, candidate });
     });
 
-    // Çat hatlary
     socket.on('chat-message', ({ text }) => {
         if (!currentRoom) return;
         io.to(currentRoom).emit('chat-message', {
@@ -235,13 +388,11 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Eliňi götermek
     socket.on('raise-hand', ({ raised }) => {
         if (!currentRoom) return;
         socket.to(currentRoom).emit('raise-hand', { id: socket.id, raised });
     });
 
-    // Kamera/mikrofon ýagdaýyny beýlekilere habar bermek (we otagyň ýadynda-da täzelemek)
     socket.on('media-state', ({ audio, video }) => {
         if (!currentRoom) return;
         if (rooms[currentRoom] && rooms[currentRoom][socket.id]) {
@@ -251,7 +402,6 @@ io.on('connection', (socket) => {
         socket.to(currentRoom).emit('media-state', { id: socket.id, audio, video });
     });
 
-    // Ulanyjy çykanda ýa-da baglanyşyk üzülende
     socket.on('disconnect', () => {
         if (currentRoom && rooms[currentRoom]) {
             delete rooms[currentRoom][socket.id];
