@@ -345,6 +345,116 @@
             font-size: 14px;
             color: #bbb;
         }
+
+        /* Lobby-daky goşmaça düwmeler hataryi (Profil / Taryh / Habarlar) */
+        .lobby-extra-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .lobby-extra-row button {
+            flex: 1;
+            font-size: 13px;
+            padding: 8px;
+        }
+
+        .permanent-room-box {
+            background: #1a1a1a;
+            border: 1px dashed #2d8cff;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .permanent-room-box button {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        /* Umumy Overlay Panel (Profil / Taryh / Habarlar üçin) */
+        .overlay-panel {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .overlay-panel.open { display: flex; }
+        .overlay-box {
+            background: #252525;
+            border: 1px solid #444;
+            border-radius: 12px;
+            padding: 25px;
+            max-width: 420px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        .overlay-box h3 { color: #2d8cff; margin-top: 0; text-align: center; }
+        .overlay-close {
+            position: absolute;
+            top: 12px; right: 15px;
+            cursor: pointer;
+            font-size: 20px;
+            color: #999;
+        }
+        .avatar-preview {
+            width: 90px; height: 90px;
+            border-radius: 50%;
+            background: #2d8cff;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; font-weight: bold;
+            margin: 0 auto 15px;
+            overflow: hidden;
+            border: 2px solid #444;
+        }
+        .avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+        .history-item, .user-list-item {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: default;
+        }
+        .user-list-item { cursor: pointer; }
+        .user-list-item:hover { border-color: #2d8cff; }
+        .user-list-item .mini-avatar {
+            width: 30px; height: 30px; border-radius: 50%;
+            background: #2d8cff; display: inline-flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: bold; margin-right: 8px; overflow: hidden; flex-shrink: 0;
+        }
+        .user-list-item .mini-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .user-row-left { display: flex; align-items: center; }
+
+        /* Habarlaşma (DM) ekrany */
+        #dmChatBox { display: none; }
+        #dmMessages {
+            max-height: 300px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .dm-msg { padding: 8px 12px; border-radius: 8px; font-size: 14px; max-width: 80%; }
+        .dm-msg.mine { background: #2d8cff; align-self: flex-end; }
+        .dm-msg.theirs { background: #1a1a1a; border: 1px solid #444; align-self: flex-start; }
+        #dmInputRow { display: flex; gap: 8px; }
+        #dmInputRow input { flex-grow: 1; }
+        .back-link { color: #2d8cff; cursor: pointer; font-size: 13px; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -379,6 +489,17 @@
         <div style="text-align:right; margin-bottom:10px;">
             <a id="lobbyLogoutLink" style="color:#2d8cff; cursor:pointer; font-size:13px; text-decoration:underline;">Çykyş</a>
         </div>
+
+        <div class="lobby-extra-row">
+            <button onclick="openProfilePanel()">👤 Profil</button>
+            <button onclick="openHistoryPanel()">🕑 Taryh</button>
+            <button onclick="openMessagesPanel()">💬 Habarlar</button>
+        </div>
+
+        <div class="permanent-room-box">
+            <span>🔒 Hemişelik Otagym: <b id="permanentRoomLabel">—</b></span>
+            <button onclick="joinPermanentRoom()">Gir</button>
+        </div>
         <div class="input-group">
             <label>Adyňyz we Familiýaňyz:</label>
             <input type="text" id="nameInput" placeholder="Hajymuhammet..." readonly>
@@ -396,6 +517,55 @@
             <select id="videoSource"></select>
         </div>
         <button class="primary-btn" id="joinBtn">Otaga Gir</button>
+    </div>
+
+    <!-- Profil Paneli -->
+    <div class="overlay-panel" id="profilePanel">
+        <div class="overlay-box">
+            <span class="overlay-close" onclick="closeOverlay('profilePanel')">✕</span>
+            <h3>Profil</h3>
+            <div class="avatar-preview" id="avatarPreview">?</div>
+            <div class="input-group">
+                <label>Surat saýlaň:</label>
+                <input type="file" id="avatarFileInput" accept="image/*">
+            </div>
+            <div class="input-group">
+                <label>Adyňyz:</label>
+                <input type="text" id="profileNameInput" placeholder="Adyňyz">
+            </div>
+            <div class="auth-error" id="profileError"></div>
+            <button class="primary-btn" onclick="saveProfile()">Ýatda Sakla</button>
+        </div>
+    </div>
+
+    <!-- Duşuşyk Taryhy Paneli -->
+    <div class="overlay-panel" id="historyPanel">
+        <div class="overlay-box">
+            <span class="overlay-close" onclick="closeOverlay('historyPanel')">✕</span>
+            <h3>Duşuşyk Taryhy</h3>
+            <div id="historyList">Ýüklenýär...</div>
+        </div>
+    </div>
+
+    <!-- Habarlaşma (Messages) Paneli -->
+    <div class="overlay-panel" id="messagesPanel">
+        <div class="overlay-box">
+            <span class="overlay-close" onclick="closeOverlay('messagesPanel')">✕</span>
+            <h3 id="messagesTitle">Habarlar</h3>
+
+            <div id="userListBox">
+                <div id="userList">Ýüklenýär...</div>
+            </div>
+
+            <div id="dmChatBox">
+                <div class="back-link" onclick="backToUserList()">← Yza</div>
+                <div id="dmMessages"></div>
+                <div id="dmInputRow">
+                    <input type="text" id="dmTextInput" placeholder="Habar ýazyň...">
+                    <button onclick="sendDm()">Ugrat</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Duşuşyk Meýilleşdirmek Bölümi -->
@@ -511,12 +681,25 @@
         }
         authSwitchLink.onclick = () => setAuthMode(authMode === 'login' ? 'register' : 'login');
 
+        let currentUser = null;
+
+        function avatarHtml(user, size) {
+            if (user && user.avatar) {
+                return `<img src="${user.avatar}" alt="">`;
+            }
+            const initial = (user && user.name) ? user.name.trim().charAt(0).toUpperCase() : '?';
+            return initial;
+        }
+
         function showApp(user) {
+            currentUser = user;
             authModal.style.display = 'none';
             document.getElementById('lobbyModal').style.display = 'block';
             document.getElementById('scheduleSection').style.display = 'block';
             document.getElementById('nameInput').value = user.name;
             document.getElementById('loggedInUserTag').textContent = '👤 ' + user.name;
+            document.getElementById('permanentRoomLabel').textContent = user.permanentRoomId || '—';
+            if (typeof authenticateSocketIfReady === 'function') authenticateSocketIfReady();
         }
 
         function showAuthError(message) {
@@ -578,11 +761,210 @@
                 setAuthMode('login');
             }
         })();
+
+        // ---- Kömekçi: awtorizasiýaly fetch ----
+        function authHeaders() {
+            const token = localStorage.getItem('sk_token');
+            return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+        }
+
+        function closeOverlay(id) {
+            document.getElementById(id).classList.remove('open');
+        }
+
+        // ---- Hemişelik Otag ----
+        function joinPermanentRoom() {
+            if (!currentUser || !currentUser.permanentRoomId) return;
+            document.getElementById('roomInput').value = currentUser.permanentRoomId;
+            closeOverlay('profilePanel');
+        }
+
+        // ---- Profil Paneli ----
+        let pendingAvatarDataUrl = null;
+
+        function openProfilePanel() {
+            document.getElementById('profileError').style.display = 'none';
+            document.getElementById('profileNameInput').value = currentUser.name;
+            pendingAvatarDataUrl = null;
+            document.getElementById('avatarFileInput').value = '';
+            document.getElementById('avatarPreview').innerHTML = avatarHtml(currentUser);
+            document.getElementById('profilePanel').classList.add('open');
+        }
+
+        document.getElementById('avatarFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => {
+                    // Suraty kiçeltmek (200x200), maglumat ulanjak ýerini az saklamak üçin
+                    const canvas = document.createElement('canvas');
+                    const size = 200;
+                    canvas.width = size;
+                    canvas.height = size;
+                    const ctx = canvas.getContext('2d');
+                    const minSide = Math.min(img.width, img.height);
+                    const sx = (img.width - minSide) / 2;
+                    const sy = (img.height - minSide) / 2;
+                    ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+                    pendingAvatarDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    document.getElementById('avatarPreview').innerHTML = `<img src="${pendingAvatarDataUrl}">`;
+                };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        async function saveProfile() {
+            const errBox = document.getElementById('profileError');
+            errBox.style.display = 'none';
+            const name = document.getElementById('profileNameInput').value.trim();
+            const body = {};
+            if (name) body.name = name;
+            if (pendingAvatarDataUrl) body.avatar = pendingAvatarDataUrl;
+
+            try {
+                const res = await fetch('/api/profile', {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    errBox.textContent = data.error || 'Ýalňyşlyk';
+                    errBox.style.display = 'block';
+                    return;
+                }
+                currentUser = data.user;
+                localStorage.setItem('sk_user', JSON.stringify(data.user));
+                document.getElementById('nameInput').value = data.user.name;
+                document.getElementById('loggedInUserTag').textContent = '👤 ' + data.user.name;
+                closeOverlay('profilePanel');
+            } catch (err) {
+                errBox.textContent = 'Serwer bilen baglanyşyk ýok';
+                errBox.style.display = 'block';
+            }
+        }
+
+        // ---- Duşuşyk Taryhy ----
+        async function openHistoryPanel() {
+            document.getElementById('historyPanel').classList.add('open');
+            const listEl = document.getElementById('historyList');
+            listEl.textContent = 'Ýüklenýär...';
+            try {
+                const res = await fetch('/api/history', { headers: authHeaders() });
+                const items = await res.json();
+                if (!items.length) {
+                    listEl.innerHTML = '<p style="color:#999; text-align:center;">Entek hiç bir duşuşyga gatnaşmadyňyz.</p>';
+                    return;
+                }
+                listEl.innerHTML = items.map(item => {
+                    const date = new Date(item.joinedAt);
+                    const dateStr = date.toLocaleDateString('ru-RU') + ' ' + date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                    return `<div class="history-item"><span>🏠 ${item.roomId}</span><span style="color:#999;">${dateStr}</span></div>`;
+                }).join('');
+            } catch (err) {
+                listEl.innerHTML = '<p style="color:#ff6b6b;">Taryh ýüklenip bilmedi.</p>';
+            }
+        }
+
+        // ---- Habarlaşma (Messages) ----
+        let dmOtherUser = null;
+
+        async function openMessagesPanel() {
+            document.getElementById('messagesPanel').classList.add('open');
+            document.getElementById('userListBox').style.display = 'block';
+            document.getElementById('dmChatBox').style.display = 'none';
+            document.getElementById('messagesTitle').textContent = 'Habarlar';
+            const listEl = document.getElementById('userList');
+            listEl.textContent = 'Ýüklenýär...';
+            try {
+                const res = await fetch('/api/users', { headers: authHeaders() });
+                const users = await res.json();
+                if (!users.length) {
+                    listEl.innerHTML = '<p style="color:#999; text-align:center;">Entek başga hasaba alnan ulanyjy ýok.</p>';
+                    return;
+                }
+                listEl.innerHTML = users.map(u => `
+                    <div class="user-list-item" onclick='openDmWith(${JSON.stringify(u)})'>
+                        <div class="user-row-left">
+                            <div class="mini-avatar">${avatarHtml(u)}</div>
+                            <span>${u.name}</span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                listEl.innerHTML = '<p style="color:#ff6b6b;">Ulanyjylar ýüklenip bilmedi.</p>';
+            }
+        }
+
+        function backToUserList() {
+            document.getElementById('userListBox').style.display = 'block';
+            document.getElementById('dmChatBox').style.display = 'none';
+            document.getElementById('messagesTitle').textContent = 'Habarlar';
+        }
+
+        async function openDmWith(user) {
+            dmOtherUser = user;
+            document.getElementById('userListBox').style.display = 'none';
+            document.getElementById('dmChatBox').style.display = 'block';
+            document.getElementById('messagesTitle').textContent = '💬 ' + user.name;
+            const box = document.getElementById('dmMessages');
+            box.innerHTML = 'Ýüklenýär...';
+            try {
+                const res = await fetch('/api/messages/' + user.id, { headers: authHeaders() });
+                const messages = await res.json();
+                renderDmMessages(messages);
+            } catch (err) {
+                box.innerHTML = '<p style="color:#ff6b6b;">Habarlar ýüklenip bilmedi.</p>';
+            }
+        }
+
+        function renderDmMessages(messages) {
+            const box = document.getElementById('dmMessages');
+            box.innerHTML = messages.map(m => {
+                const mine = currentUser && m.fromUserId === currentUser.id;
+                return `<div class="dm-msg ${mine ? 'mine' : 'theirs'}">${m.text}</div>`;
+            }).join('');
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function sendDm() {
+            const input = document.getElementById('dmTextInput');
+            const text = input.value.trim();
+            if (!text || !dmOtherUser) return;
+            if (typeof socket !== 'undefined') {
+                socket.emit('send-dm', { toUserId: dmOtherUser.id, text });
+            }
+            input.value = '';
+        }
+
+        document.getElementById('dmTextInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendDm();
+        });
     </script>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
+
+        // ---- Ulanyjy hasabyny socket bilen baglanyşdyrmak (habarlaşma we taryh üçin) ----
+        function authenticateSocketIfReady() {
+            const token = localStorage.getItem('sk_token');
+            if (token) socket.emit('authenticate', token);
+        }
+        socket.on('connect', authenticateSocketIfReady);
+
+        // Täze şahsy habar gelende (Messages paneli açyk bolsa görkezmek)
+        socket.on('receive-dm', (message) => {
+            if (dmOtherUser && (message.fromUserId === dmOtherUser.id || message.toUserId === dmOtherUser.id)) {
+                const box = document.getElementById('dmMessages');
+                const mine = currentUser && message.fromUserId === currentUser.id;
+                box.innerHTML += `<div class="dm-msg ${mine ? 'mine' : 'theirs'}">${message.text}</div>`;
+                box.scrollTop = box.scrollHeight;
+            }
+        });
 
         // Köp adamly wideo-baglanyşyk üçin STUN/TURN serwerler
         // STUN — adaty toruň aňyrsyndakylar üçin ýeterlik
