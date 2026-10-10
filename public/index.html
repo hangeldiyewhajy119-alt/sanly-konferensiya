@@ -2,6 +2,7 @@
 <html lang="tk">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
     <title>Sanly Konferensiýa - Ekran Paýlaşmak</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -557,8 +558,72 @@
         #dmInputRow input { flex-grow: 1; }
         .back-link { color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 600; display: inline-block; margin-bottom: 14px; }
         .back-link:hover { text-decoration: underline; }
-    
-</style>
+
+        /* ============ MOBIL TELEFON ÜÇIN UÝGUNLAŞDYRMA ============ */
+        @media (max-width: 760px) {
+            body { padding: 12px; }
+
+            #authModal, #lobbyModal, .schedule-section {
+                max-width: 100%;
+                margin: 16px auto;
+                padding: 20px;
+            }
+
+            #authModal h2, #lobbyModal h2 { font-size: 19px; }
+
+            .overlay-box { padding: 20px; width: 94%; }
+
+            /* Wideo/Çat gapdal-gapdal ýerine ýokardan-aşak düzülýär */
+            .main-layout {
+                flex-direction: column;
+                height: auto;
+                gap: 14px;
+            }
+
+            .video-section { flex: none; }
+
+            .video-grid {
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                gap: 8px;
+                overflow-y: visible;
+            }
+
+            .video-grid.spotlight-mode .video-box { flex: 0 0 100px; }
+            .video-grid.spotlight-mode .video-box.pinned { min-height: 260px; }
+
+            .chat-section {
+                max-width: 100%;
+                height: 360px;
+            }
+
+            .header-info {
+                flex-wrap: wrap;
+                gap: 8px;
+                padding: 10px 14px;
+                font-size: 13px;
+            }
+
+            .controls {
+                gap: 6px;
+                position: sticky;
+                bottom: 0;
+                background: var(--bg);
+                padding: 10px 0 4px;
+            }
+            .controls button { padding: 9px 12px; font-size: 13px; }
+
+            .lobby-extra-row { flex-wrap: wrap; }
+            .lobby-extra-row button { flex: 1 1 30%; }
+
+            .permanent-room-box { flex-wrap: wrap; font-size: 12px; }
+        }
+
+        @media (max-width: 420px) {
+            .video-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+            .participants-list { max-height: 120px; }
+            .dm-msg { max-width: 92%; }
+        }
+    </style>
 </head>
 <body>
 
