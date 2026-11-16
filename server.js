@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { RtcTokenBuilder, RtcRole } = require('agora-token');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,6 +18,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---- MongoDB baglanyşygy ----
 const MONGODB_URI = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET || 'sanly-konferensiya-gizlin-acar-2026';
+
+const AGORA_APP_ID = process.env.AGORA_APP_ID;
+const AGORA_APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+// Sahnada (kamera/mikrofon bilen) bir wagtda iň köp näçe adam bolup biler.
+// Galanlary tomaşaçy bolýar. Agora mugt minutlaryny tygşytlamak üçin kiçi sanda saklamak maslahat berilýär.
+const MAX_HOSTS = parseInt(process.env.AGORA_MAX_HOSTS || '6', 10);
 
 let meetingsCollection = null;
 let usersCollection = null;
@@ -260,6 +267,30 @@ app.get('/api/messages/:userId', authMiddleware, async (req, res) => {
     }
 });
 
+// ---- Agora Token (wideo otagyna girmek üçin) ----
+function channelFor(roomId) {
+    // Agora kanal ady diňe belli simwollary kabul edýär, şonuň üçin otag adyny hash edýäris
+    return crypto.createHash('sha1').update(String(roomId)).digest('hex').slice(0, 32);
+}
+
+app.get('/api/agora-token', authMiddleware, (req, res) => {
+    if (!AGORA_APP_ID || !AGORA_APP_CERTIFICATE) {
+        return res.status(503).json({ error: 'Wideo ulgamy heniz sazlanmady (Agora)' });
+    }
+    const roomId = String(req.query.roomId || '').trim();
+    const uid = parseInt(req.query.uid, 10);
+    if (!roomId || !Number.isInteger(uid) || uid <= 0) {
+        return res.status(400).json({ error: 'roomId we uid gerek' });
+    }
+    const channel = channelFor(roomId);
+    const expireSeconds = 3600;
+    const token = RtcTokenBuilder.buildTokenWithUid(
+        AGORA_APP_ID, AGORA_APP_CERTIFICATE, channel, uid,
+        RtcRole.PUBLISHER, expireSeconds, expireSeconds
+    );
+    res.json({ token, appId: AGORA_APP_ID, channel, expiresIn: expireSeconds });
+});
+
 // ---- Duşuşyklary Meýilleşdirmek (API) ----
 
 app.get('/api/meetings', async (req, res) => {
@@ -305,8 +336,13 @@ app.post('/api/meetings', async (req, res) => {
     }
 });
 
-// Otaglaryň içindäki ulanyjylary ýatda saklamak: { roomId: { socketId: { name, audio, video } } }
+// Otaglaryň içindäki ulanyjylary ýatda saklamak:
+// { roomId: { socketId: { name, audio, video, role, agoraUid } } }
 const rooms = {};
+
+function hostCount(roomId) {
+    return Object.values(rooms[roomId] || {}).filter(u => u.role === 'host').length;
+}
 
 io.on('connection', (socket) => {
     let currentRoom = null;
@@ -320,7 +356,7 @@ io.on('connection', (socket) => {
             socket.userId = decoded.id;
             socket.join('user-' + decoded.id);
         } catch (err) {
-            // token nädogry bolsa, ünsi almaýarys — anon hökmünde dowam edýär
+            // token nädogry bolsa, anon hökmünde dowam edýär
         }
     });
 
@@ -337,25 +373,31 @@ io.on('connection', (socket) => {
             await messagesCollection.insertOne(message);
         }
         io.to('user-' + toUserId).emit('receive-dm', message);
-        socket.emit('receive-dm', message); // iberijiniň öz ekranynda-da görünsin
+        socket.emit('receive-dm', message);
     });
 
-    // Ulanyjy otaga girende
-    socket.on('join-room', async ({ roomId, userName }) => {
+    // Ulanyjy otaga girende: sahna (host) ýa-da tomaşaçy (audience) roly berilýär
+    socket.on('join-room', async ({ roomId, userName, agoraUid }) => {
         currentRoom = roomId;
         currentUserName = userName;
 
         socket.join(roomId);
-
         if (!rooms[roomId]) rooms[roomId] = {};
 
+        const role = hostCount(roomId) < MAX_HOSTS ? 'host' : 'audience';
+
         const existingUsers = Object.entries(rooms[roomId]).map(([id, info]) => ({
-            id, name: info.name, audio: info.audio, video: info.video
+            id, name: info.name, audio: info.audio, video: info.video,
+            role: info.role, agoraUid: info.agoraUid
         }));
         socket.emit('existing-users', existingUsers);
+        socket.emit('role-assigned', { role, maxHosts: MAX_HOSTS });
 
-        rooms[roomId][socket.id] = { name: userName, audio: true, video: true };
-        socket.to(roomId).emit('user-joined', { id: socket.id, name: userName, audio: true, video: true });
+        const isHost = role === 'host';
+        rooms[roomId][socket.id] = { name: userName, audio: isHost, video: isHost, role, agoraUid };
+        socket.to(roomId).emit('user-joined', {
+            id: socket.id, name: userName, audio: isHost, video: isHost, role, agoraUid
+        });
 
         // Giren hasaby üçin duşuşyk taryhyny ýazmak
         if (socket.userId && historyCollection) {
@@ -367,18 +409,33 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('offer', ({ to, offer }) => {
-        io.to(to).emit('offer', { from: socket.id, offer });
+    // Tomaşaçy sahna çykmak isleýär
+    socket.on('request-stage', () => {
+        if (!currentRoom || !rooms[currentRoom] || !rooms[currentRoom][socket.id]) return;
+        const me = rooms[currentRoom][socket.id];
+        if (me.role === 'host') return;
+        if (hostCount(currentRoom) >= MAX_HOSTS) {
+            socket.emit('stage-full', { maxHosts: MAX_HOSTS });
+            return;
+        }
+        me.role = 'host';
+        me.audio = true;
+        me.video = true;
+        io.to(currentRoom).emit('role-changed', { id: socket.id, role: 'host' });
     });
 
-    socket.on('answer', ({ to, answer }) => {
-        io.to(to).emit('answer', { from: socket.id, answer });
+    // Sahnadan düşmek
+    socket.on('leave-stage', () => {
+        if (!currentRoom || !rooms[currentRoom] || !rooms[currentRoom][socket.id]) return;
+        const me = rooms[currentRoom][socket.id];
+        if (me.role === 'audience') return;
+        me.role = 'audience';
+        me.audio = false;
+        me.video = false;
+        io.to(currentRoom).emit('role-changed', { id: socket.id, role: 'audience' });
     });
 
-    socket.on('ice-candidate', ({ to, candidate }) => {
-        io.to(to).emit('ice-candidate', { from: socket.id, candidate });
-    });
-
+    // Çat hatlary
     socket.on('chat-message', ({ text }) => {
         if (!currentRoom) return;
         io.to(currentRoom).emit('chat-message', {
@@ -388,11 +445,13 @@ io.on('connection', (socket) => {
         });
     });
 
+    // Eliňi götermek
     socket.on('raise-hand', ({ raised }) => {
         if (!currentRoom) return;
         socket.to(currentRoom).emit('raise-hand', { id: socket.id, raised });
     });
 
+    // Kamera/mikrofon ýagdaýyny beýlekilere habar bermek
     socket.on('media-state', ({ audio, video }) => {
         if (!currentRoom) return;
         if (rooms[currentRoom] && rooms[currentRoom][socket.id]) {
@@ -402,6 +461,7 @@ io.on('connection', (socket) => {
         socket.to(currentRoom).emit('media-state', { id: socket.id, audio, video });
     });
 
+    // Ulanyjy çykanda ýa-da baglanyşyk üzülende
     socket.on('disconnect', () => {
         if (currentRoom && rooms[currentRoom]) {
             delete rooms[currentRoom][socket.id];
