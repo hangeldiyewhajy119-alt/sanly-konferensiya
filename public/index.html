@@ -559,6 +559,19 @@
         .back-link { color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 600; display: inline-block; margin-bottom: 14px; }
         .back-link:hover { text-decoration: underline; }
 
+        /* Agora wideo oýnaýjy we tomaşaçy bellik */
+        .agora-player { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; }
+        .role-banner {
+            background: var(--accent-soft);
+            border: 1px solid var(--accent);
+            color: var(--text);
+            padding: 10px 16px;
+            border-radius: var(--radius-s);
+            margin-bottom: 14px;
+            font-size: 14px;
+        }
+        button:disabled { opacity: 0.45; cursor: not-allowed; }
+
         /* ============ MOBIL TELEFON ÜÇIN UÝGUNLAŞDYRMA ============ */
         @media (max-width: 760px) {
             body { padding: 12px; }
@@ -764,8 +777,12 @@
             <span id="roomTitleInfo">Otag: halkara-otag-1</span>
             <div class="user-bar">
                 <span class="user-name-tag" id="loggedInUserTag"></span>
-                <button onclick="location.reload()" style="background: #e81123; border:none;">Otagdan Çyk</button>
+                <button onclick="leaveRoom()" style="background: #e81123; border:none;">Otagdan Çyk</button>
             </div>
+        </div>
+
+        <div id="roleBanner" class="role-banner" style="display:none;">
+            👀 Siz tomaşaçy reýimindesiňiz. Kamera we mikrofon bilen gürlemek üçin «🎤 Sahna Çyk» düwmesine basyň.
         </div>
 
         <div class="main-layout">
@@ -773,7 +790,7 @@
                 <div class="video-grid" id="videoGrid">
                     <!-- Öz wideomyz -->
                     <div class="video-box" id="localVideoBox">
-                        <video id="localVideo" autoplay muted playsinline></video>
+                        <div id="localPlayer" class="agora-player"></div>
                         <span class="pin-hint">🔍 Ulaltmak üçin bas</span>
                         <div class="user-label">
                             <span id="handIcon" style="display:none;">✋</span>
@@ -787,6 +804,7 @@
                 <div class="controls">
                     <button id="muteAudioBtn">Mikrofony Öçür</button>
                     <button id="muteVideoBtn">Kamerany Öçür</button>
+                    <button id="stageBtn" style="background: #22b8a0; border:none; color:#06231e;">🎤 Sahna Çyk</button>
                     <button id="raiseHandBtn" style="background: #d88b00; border:none;">✋ Eliňi Göter</button>
                     <button id="shareScreenBtn">🖥️ Ekran Paýlaş</button>
                     <button id="recordBtn">⏺️ Ýazgy Başla</button>
@@ -1113,6 +1131,7 @@
         });
     </script>
 
+    <script src="https://cdn.jsdelivr.net/npm/agora-rtc-sdk-ng@4.23.4/AgoraRTC_N-production.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
@@ -1134,38 +1153,27 @@
             }
         });
 
-        // Köp adamly wideo-baglanyşyk üçin STUN/TURN serwerler
-        // STUN — adaty toruň aňyrsyndakylar üçin ýeterlik
-        // TURN — berk NAT/firewall (kompaniýa, mekdep torlary) aňyrsyndakylar üçin gerek
-        const ICE_SERVERS = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                {
-                    urls: 'turn:openrelay.metered.ca:80',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                },
-                {
-                    urls: 'turn:openrelay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                },
-                {
-                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                }
-            ]
-        };
+        // ================= AGORA (SFU) WIDEO ULGAMY =================
+        // Agora "live" reýimi: sahnadaky adamlar (host) kamera/mikrofon ugradýar,
+        // galanlary (audience) diňe tomaşa edýär. El götermek / "Sahna Çyk" bilen rol çalşyp bolýar.
+        AgoraRTC.setLogLevel(2);
+        const agoraClient = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
 
-        const peers = {};        // { socketId: RTCPeerConnection }
-        const remoteNames = {};  // { socketId: userName }
+        let agoraUid = null;
+        let myRole = 'audience';
+        let maxHosts = 6;
+        let localAudioTrack = null;
+        let localVideoTrack = null;
+        let screenVideoTrack = null;
+
+        const remoteNames = {};     // { socketId: userName }
+        const uidToSocketId = {};   // { agoraUid: socketId }
         let roomId = null;
 
         const lobbyModal = document.getElementById('lobbyModal');
         const conferenceRoom = document.getElementById('conferenceRoom');
         const joinBtn = document.getElementById('joinBtn');
-        
+
         const nameInput = document.getElementById('nameInput');
         const roomInput = document.getElementById('roomInput');
         const displayNameText = document.getElementById('displayNameText');
@@ -1174,12 +1182,12 @@
         const audioSelect = document.getElementById('audioSource');
         const videoSelect = document.getElementById('videoSource');
 
-        const localVideo = document.getElementById('localVideo');
         const muteAudioBtn = document.getElementById('muteAudioBtn');
         const muteVideoBtn = document.getElementById('muteVideoBtn');
         const raiseHandBtn = document.getElementById('raiseHandBtn');
         const shareScreenBtn = document.getElementById('shareScreenBtn');
         const recordBtn = document.getElementById('recordBtn');
+        const stageBtn = document.getElementById('stageBtn');
         const handIcon = document.getElementById('handIcon');
         const videoGrid = document.getElementById('videoGrid');
 
@@ -1203,6 +1211,7 @@
                 videoGrid.classList.add('spotlight-mode');
                 pinnedId = boxId;
             }
+            applyStreamQualities();
         }
 
         document.getElementById('localVideoBox').onclick = () => togglePin('localVideoBox');
@@ -1212,18 +1221,20 @@
         const sendChatBtn = document.getElementById('sendChatBtn');
         const chatMessages = document.getElementById('chatMessages');
 
-        let localStream;
-        let screenStream;
         let isHandRaised = false;
         let currentUserName = "Men";
 
-        // Otagdaky ähli gatnaşyjylar: { id: { name, audio, video, isLocal } }
+        // Otagdaky ähli gatnaşyjylar: { id: { name, audio, video, isLocal, role, hand } }
         const participants = {};
 
         function renderParticipants() {
             const list = document.getElementById('participantsList');
             const countEl = document.getElementById('participantCount');
-            const ids = Object.keys(participants);
+            const ids = Object.keys(participants).sort((a, b) => {
+                const ra = participants[a].role === 'host' ? 0 : 1;
+                const rb = participants[b].role === 'host' ? 0 : 1;
+                return ra - rb;
+            });
             countEl.textContent = ids.length;
             list.innerHTML = '';
             ids.forEach(id => {
@@ -1237,23 +1248,28 @@
 
                 const statusSpan = document.createElement('span');
                 statusSpan.className = 'participant-status';
-                if (!p.audio) {
+
+                const addBadge = (text, bg) => {
                     const badge = document.createElement('span');
                     badge.className = 'status-badge';
-                    badge.textContent = '🔇';
+                    if (bg) badge.style.background = bg;
+                    badge.textContent = text;
                     statusSpan.appendChild(badge);
-                }
-                if (!p.video) {
-                    const badge = document.createElement('span');
-                    badge.className = 'status-badge';
-                    badge.textContent = '🚫📷';
-                    statusSpan.appendChild(badge);
+                };
+
+                if (p.hand) addBadge('✋', '#d88b00');
+                if (p.role === 'audience') {
+                    addBadge('👀', '#3a4656');
+                } else {
+                    if (!p.audio) addBadge('🔇');
+                    if (!p.video) addBadge('🚫📷');
                 }
 
                 item.appendChild(nameSpan);
                 item.appendChild(statusSpan);
                 list.appendChild(item);
             });
+            applyLocalQuality();
         }
 
         function updateRemoteStatusIcons(id, audio, video) {
@@ -1291,13 +1307,168 @@
             getDevices();
         }).catch(() => {});
 
+        // ---- Rola görä interfeýsi täzelemek ----
+        function applyRoleUI(role) {
+            myRole = role;
+            const isHost = role === 'host';
+            document.getElementById('localVideoBox').style.display = isHost ? '' : 'none';
+            document.getElementById('roleBanner').style.display = isHost ? 'none' : 'block';
+            stageBtn.textContent = isHost ? '⬇️ Sahnadan Düş' : '🎤 Sahna Çyk';
+            stageBtn.classList.toggle('active', isHost);
+            muteAudioBtn.disabled = !isHost;
+            muteVideoBtn.disabled = !isHost;
+            shareScreenBtn.disabled = !isHost;
+            if (participants['local']) {
+                participants['local'].role = role;
+                participants['local'].audio = isHost;
+                participants['local'].video = isHost;
+            }
+            renderParticipants();
+        }
+
+        // ---- Agora token almak ----
+        async function fetchAgoraToken() {
+            const res = await fetch(
+                `/api/agora-token?roomId=${encodeURIComponent(roomId)}&uid=${agoraUid}`,
+                { headers: authHeaders() }
+            );
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Token alnyp bolmady');
+            return data;
+        }
+
+        // ---- Kameranyň hilini sahnadaky adam sanyna görä awtomatik sazlamak ----
+        // 3 ýa-da az adam: 720p (HD). 4-den köp: 480p (internet we Agora minutlaryny tygşytlamak üçin).
+        const HD_MAX_HOSTS = 3;
+        let currentQuality = null;
+
+        function hostCountWithMe() {
+            return Object.keys(participants).filter(id => id !== 'local' && participants[id].role === 'host').length + 1;
+        }
+        function desiredQuality() {
+            return hostCountWithMe() <= HD_MAX_HOSTS ? '720p' : '480p';
+        }
+        async function applyLocalQuality() {
+            if (!localVideoTrack || myRole !== 'host' || screenVideoTrack) return;
+            const q = desiredQuality();
+            if (q === currentQuality) return;
+            currentQuality = q;
+            try { await localVideoTrack.setEncoderConfiguration(q); }
+            catch (e) { console.warn('Hil üýtgedilip bilmedi:', e); }
+        }
+
+        // ---- Kamera/mikrofon açyp, Agora-a ýaýlym etmek (sahna) ----
+        async function startPublishing() {
+            const audioId = audioSelect.value || undefined;
+            const videoId = videoSelect.value || undefined;
+
+            try { localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({ microphoneId: audioId }); }
+            catch (e) { console.warn('Mikrofon açylmady:', e); }
+            try { currentQuality = desiredQuality();
+                localVideoTrack = await AgoraRTC.createCameraVideoTrack({ cameraId: videoId, encoderConfig: currentQuality }); }
+            catch (e) { console.warn('Kamera açylmady:', e); }
+
+            if (!localAudioTrack && !localVideoTrack) throw new Error('Kamera we mikrofon açylmady');
+
+            try { await agoraClient.enableDualStream(); } catch (e) { /* hökmany däl */ }
+            await agoraClient.publish([localAudioTrack, localVideoTrack].filter(Boolean));
+
+            if (localVideoTrack) localVideoTrack.play('localPlayer', { fit: 'cover' });
+
+            muteAudioBtn.textContent = "Mikrofony Öçür";
+            muteAudioBtn.classList.remove('active');
+            muteVideoBtn.textContent = "Kamerany Öçür";
+            muteVideoBtn.classList.remove('active');
+            document.getElementById('localMicStatus').style.display = 'none';
+            document.getElementById('localCamStatus').style.display = 'none';
+        }
+
+        async function becomeHost() {
+            try {
+                await agoraClient.setClientRole('host');
+                await startPublishing();
+                applyRoleUI('host');
+                socket.emit('media-state', {
+                    audio: !!localAudioTrack,
+                    video: !!localVideoTrack
+                });
+            } catch (err) {
+                console.error('Sahna çykyp bolmady:', err);
+                alert('Kamera ýa-da mikrofon açylmady!');
+                socket.emit('leave-stage');
+            }
+        }
+
+        async function becomeAudience() {
+            if (screenVideoTrack) await stopScreenSharing(true);
+            const tracks = [localAudioTrack, localVideoTrack].filter(Boolean);
+            try { if (tracks.length) await agoraClient.unpublish(tracks); } catch (e) {}
+            tracks.forEach(t => { try { t.stop(); t.close(); } catch (e) {} });
+            localAudioTrack = null;
+            localVideoTrack = null;
+            try { await agoraClient.setClientRole('audience', { level: 1 }); } catch (e) {}
+            applyRoleUI('audience');
+        }
+
+        // ---- Otaga birinji gezek girmek (Agora kanalyna goşulmak) ----
+        async function startAgora(role) {
+            try {
+                const tk = await fetchAgoraToken();
+                await agoraClient.setClientRole(role, role === 'audience' ? { level: 1 } : undefined);
+                await agoraClient.join(tk.appId, tk.channel, tk.token, agoraUid);
+
+                if (role === 'host') {
+                    try {
+                        await startPublishing();
+                    } catch (err) {
+                        console.error(err);
+                        alert('Kamera ýa-da mikrofon açylmady. Tomaşaçy hökmünde goşuldyňyz.');
+                        socket.emit('leave-stage');
+                        role = 'audience';
+                    }
+                }
+                applyRoleUI(role);
+            } catch (err) {
+                console.error('Agora ýalňyşlygy:', err);
+                alert('Wideo ulgamyna goşulyp bolmady: ' + err.message);
+                leaveRoom();
+            }
+        }
+
+        // ---- Agora tokeni möhleti geçmänkä täzelemek (bir sagatdan uzak duşuşyklar üçin) ----
+        async function renewAgoraToken() {
+            try {
+                const tk = await fetchAgoraToken();
+                await agoraClient.renewToken(tk.token);
+            } catch (err) {
+                console.error('Token täzelenip bilmedi:', err);
+            }
+        }
+        agoraClient.on('token-privilege-will-expire', renewAgoraToken);
+        agoraClient.on('token-privilege-did-expire', renewAgoraToken);
+
+        // ---- Otagdan çykmak ----
+        async function leaveRoom() {
+            try {
+                [localAudioTrack, localVideoTrack, screenVideoTrack].filter(Boolean).forEach(t => {
+                    try { t.stop(); t.close(); } catch (e) {}
+                });
+                await agoraClient.leave();
+            } catch (e) {}
+            location.reload();
+        }
+
         // Otaga Girmek Düwmesi
-        joinBtn.onclick = async () => {
+        joinBtn.onclick = () => {
             const userName = nameInput.value.trim();
             const roomName = roomInput.value.trim();
 
             if (!userName) {
                 alert("Häk, adyňyzy ýazmagy unutdyňyz!");
+                return;
+            }
+            if (!roomName) {
+                alert("Otag belgisini ýazyň!");
                 return;
             }
 
@@ -1306,33 +1477,19 @@
             displayNameText.textContent = userName + " (Men)";
             roomTitleInfo.textContent = "Otag: " + roomName;
 
-            try {
-                const audioId = audioSelect.value;
-                const videoId = videoSelect.value;
+            lobbyModal.style.display = 'none';
+            conferenceRoom.style.display = 'block';
+            document.getElementById('scheduleSection').style.display = 'none';
 
-                const constraints = {
-                    audio: audioId ? { deviceId: { exact: audioId } } : true,
-                    video: videoId ? { deviceId: { exact: videoId }, width: { ideal: 1280 }, height: { ideal: 720 } } : true
-                };
+            agoraUid = Math.floor(Math.random() * 2000000000) + 1;
+            participants['local'] = { name: userName, audio: false, video: false, isLocal: true, role: 'audience', hand: false };
+            applyRoleUI('audience');
 
-                localStream = await navigator.mediaDevices.getUserMedia(constraints);
-                localVideo.srcObject = localStream;
-
-                lobbyModal.style.display = 'none';
-                conferenceRoom.style.display = 'block';
-
-                participants['local'] = { name: userName, audio: true, video: true, isLocal: true };
-                renderParticipants();
-
-                socket.emit('join-room', { roomId, userName });
-
-            } catch (error) {
-                console.error("Kamera ýalňyşlygy:", error);
-                alert("Kamera ýa-da mikrofon açylmady!");
-            }
+            // Serwer bize rol berer ('role-assigned'), soň Agora-a goşularys
+            socket.emit('join-room', { roomId, userName, agoraUid });
         };
 
-        // --- Kömekçi funksiýalar: uzakdaky ulanyjynyň wideo-gutusyny döretmek/aýyrmak ---
+        // --- Uzakdaky ulanyjynyň wideo-gutusyny döretmek/aýyrmak ---
         function createRemoteVideoBox(id, name) {
             if (document.getElementById('videoBox-' + id)) return;
 
@@ -1340,21 +1497,23 @@
             box.className = 'video-box';
             box.id = 'videoBox-' + id;
             box.innerHTML = `
-                <video id="video-${id}" autoplay playsinline></video>
+                <div id="agora-${id}" class="agora-player"></div>
                 <span class="pin-hint">🔍 Ulaltmak üçin bas</span>
                 <div class="user-label">
                     <span class="handIcon-${id}" style="display:none;">✋</span>
                     <span class="micStatus-${id}" style="display:none;">🔇</span>
                     <span class="camStatus-${id}" style="display:none;">🚫📷</span>
-                    <span>${name}</span>
+                    <span class="remote-name"></span>
                 </div>
             `;
+            box.querySelector('.remote-name').textContent = name;
             document.getElementById('videoGrid').appendChild(box);
             box.onclick = () => togglePin('videoBox-' + id);
 
-            // Eger bu ulanyjynyň ses/wideo ýagdaýy eýýäm bize mälim bolsa, ikonalary şoňa görä goý
             if (participants[id]) {
                 updateRemoteStatusIcons(id, participants[id].audio, participants[id].video);
+                const handEl = box.querySelector('.handIcon-' + id);
+                if (handEl && participants[id].hand) handEl.style.display = 'inline';
             }
         }
 
@@ -1368,84 +1527,110 @@
             if (box) box.remove();
         }
 
-        // --- Bir uzakdaky ulanyjy üçin RTCPeerConnection döretmek ---
-        function createPeerConnection(id, name) {
-            const pc = new RTCPeerConnection(ICE_SERVERS);
-            peers[id] = pc;
-            remoteNames[id] = name;
-
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    socket.emit('ice-candidate', { to: id, candidate: event.candidate });
-                }
-            };
-
-            pc.ontrack = (event) => {
-                createRemoteVideoBox(id, name);
-                const videoEl = document.getElementById('video-' + id);
-                if (videoEl) videoEl.srcObject = event.streams[0];
-            };
-
-            pc.onconnectionstatechange = () => {
-                if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-                    removeRemoteVideoBox(id);
-                    delete peers[id];
-                }
-            };
-
-            return pc;
+        // Agora uid-den socket id-ni tapmak (serwer habary gijräk gelse, birneme garaşýar)
+        async function resolveSocketId(uid) {
+            for (let i = 0; i < 15; i++) {
+                if (uidToSocketId[uid]) return uidToSocketId[uid];
+                await new Promise(r => setTimeout(r, 200));
+            }
+            return 'agora' + uid;
         }
 
-        // --- Otagda öňden bar bolan ulanyjylar: bize teklip (offer) ibermeli ---
-        socket.on('existing-users', async (users) => {
+        // Köp wideo bolanda trafigi we mugt minutlary tygşytlamak üçin:
+        // 4-den köp wideo bolsa, diňe ulaldylan (pinned) wideo ýokary hilde, galanlary pes hilde alynýar.
+        function applyStreamQualities() {
+            const withVideo = agoraClient.remoteUsers.filter(u => u.hasVideo);
+            withVideo.forEach(u => {
+                const id = uidToSocketId[u.uid];
+                const isPinned = id && pinnedId === 'videoBox-' + id;
+                const high = withVideo.length <= 4 || isPinned;
+                agoraClient.setRemoteVideoStreamType(u.uid, high ? 0 : 1).catch(() => {});
+            });
+        }
+
+        // --- Agora hadysalary: sahnadaky biri wideo/ses ýaýlym edende ---
+        agoraClient.on('user-published', async (user, mediaType) => {
+            try {
+                await agoraClient.subscribe(user, mediaType);
+            } catch (err) {
+                console.error('Subscribe ýalňyşlygy:', err);
+                return;
+            }
+            const id = await resolveSocketId(user.uid);
+            createRemoteVideoBox(id, remoteNames[id] || 'Myhman');
+
+            if (mediaType === 'video' && user.videoTrack) {
+                user.videoTrack.play('agora-' + id, { fit: 'cover' });
+                applyStreamQualities();
+            }
+            if (mediaType === 'audio' && user.audioTrack) {
+                user.audioTrack.play();
+            }
+        });
+
+        agoraClient.on('user-unpublished', (user, mediaType) => {
+            if (mediaType === 'video') applyStreamQualities();
+        });
+
+        agoraClient.on('user-left', (user) => {
+            const id = uidToSocketId[user.uid];
+            if (id) removeRemoteVideoBox(id);
+            applyStreamQualities();
+        });
+
+        // --- Socket: rol berilýär (otaga girenden soň) ---
+        socket.on('role-assigned', async ({ role, maxHosts: max }) => {
+            maxHosts = max;
+            await startAgora(role);
+        });
+
+        // --- Socket: kimdir sahna çykdy ýa-da düşdi ---
+        socket.on('role-changed', async ({ id, role }) => {
+            if (id === socket.id) {
+                if (role === 'host') await becomeHost();
+                else await becomeAudience();
+                return;
+            }
+            if (participants[id]) {
+                participants[id].role = role;
+                participants[id].audio = role === 'host';
+                participants[id].video = role === 'host';
+            }
+            if (role === 'audience') removeRemoteVideoBox(id);
+            renderParticipants();
+        });
+
+        socket.on('stage-full', ({ maxHosts: max }) => {
+            alert(`Sahna doly (iň köp ${max} adam). Birazdan täzeden synanyşyň.`);
+        });
+
+        // --- Otagda öňden bar bolan ulanyjylar ---
+        socket.on('existing-users', (users) => {
             for (const user of users) {
-                participants[user.id] = { name: user.name, audio: user.audio, video: user.video, isLocal: false };
-
-                const pc = createPeerConnection(user.id, user.name);
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                socket.emit('offer', { to: user.id, offer });
+                participants[user.id] = {
+                    name: user.name, audio: user.audio, video: user.video,
+                    isLocal: false, role: user.role, hand: false
+                };
+                remoteNames[user.id] = user.name;
+                uidToSocketId[user.agoraUid] = user.id;
             }
             renderParticipants();
         });
 
-        // --- Täze ulanyjy goşulanda, biz garaşýarys (ol bize teklip iberer) ---
-        socket.on('user-joined', ({ id, name, audio, video }) => {
-            participants[id] = { name, audio, video, isLocal: false };
-            createPeerConnection(id, name);
+        // --- Täze ulanyjy goşulanda ---
+        socket.on('user-joined', ({ id, name, audio, video, role, agoraUid: uid }) => {
+            participants[id] = { name, audio, video, isLocal: false, role, hand: false };
+            remoteNames[id] = name;
+            uidToSocketId[uid] = id;
             renderParticipants();
-        });
-
-        socket.on('offer', async ({ from, offer }) => {
-            const pc = peers[from] || createPeerConnection(from, remoteNames[from] || 'Myhman');
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            socket.emit('answer', { to: from, answer });
-        });
-
-        socket.on('answer', async ({ from, answer }) => {
-            const pc = peers[from];
-            if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        });
-
-        socket.on('ice-candidate', async ({ from, candidate }) => {
-            const pc = peers[from];
-            if (pc) {
-                try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-                catch (err) { console.error('ICE goşmak ýalňyşlygy:', err); }
-            }
         });
 
         socket.on('user-left', ({ id }) => {
-            if (peers[id]) {
-                peers[id].close();
-                delete peers[id];
-            }
             delete remoteNames[id];
             delete participants[id];
+            Object.keys(uidToSocketId).forEach(uid => {
+                if (uidToSocketId[uid] === id) delete uidToSocketId[uid];
+            });
             removeRemoteVideoBox(id);
             renderParticipants();
         });
@@ -1462,42 +1647,48 @@
 
         // --- Eliňi götermek: uzakdaky ulanyjylara habar ---
         socket.on('raise-hand', ({ id, raised }) => {
+            if (participants[id]) participants[id].hand = raised;
             const icon = document.querySelector('.handIcon-' + id);
             if (icon) icon.style.display = raised ? 'inline' : 'none';
+            renderParticipants();
         });
 
         // Mikrofon Aç/Öçür
-        muteAudioBtn.onclick = () => {
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTrack.enabled = !audioTrack.enabled;
-                muteAudioBtn.textContent = audioTrack.enabled ? "Mikrofony Öçür" : "Mikrofon Aç";
-                muteAudioBtn.classList.toggle('active', !audioTrack.enabled);
-
-                document.getElementById('localMicStatus').style.display = audioTrack.enabled ? 'none' : 'inline';
-                if (participants['local']) participants['local'].audio = audioTrack.enabled;
-                renderParticipants();
-
-                const videoTrack = localStream.getVideoTracks()[0];
-                socket.emit('media-state', { audio: audioTrack.enabled, video: videoTrack ? videoTrack.enabled : true });
-            }
+        muteAudioBtn.onclick = async () => {
+            if (!localAudioTrack) return;
+            const mute = !localAudioTrack.muted;
+            await localAudioTrack.setMuted(mute);
+            muteAudioBtn.textContent = mute ? "Mikrofon Aç" : "Mikrofony Öçür";
+            muteAudioBtn.classList.toggle('active', mute);
+            document.getElementById('localMicStatus').style.display = mute ? 'inline' : 'none';
+            if (participants['local']) participants['local'].audio = !mute;
+            renderParticipants();
+            socket.emit('media-state', {
+                audio: !mute,
+                video: localVideoTrack ? !localVideoTrack.muted : false
+            });
         };
 
         // Kamera Aç/Öçür
-        muteVideoBtn.onclick = () => {
-            const videoTrack = localStream.getVideoTracks()[0];
-            if (videoTrack) {
-                videoTrack.enabled = !videoTrack.enabled;
-                muteVideoBtn.textContent = videoTrack.enabled ? "Kamerany Öçür" : "Kamera Aç";
-                muteVideoBtn.classList.toggle('active', !videoTrack.enabled);
+        muteVideoBtn.onclick = async () => {
+            if (!localVideoTrack) return;
+            const mute = !localVideoTrack.muted;
+            await localVideoTrack.setMuted(mute);
+            muteVideoBtn.textContent = mute ? "Kamera Aç" : "Kamerany Öçür";
+            muteVideoBtn.classList.toggle('active', mute);
+            document.getElementById('localCamStatus').style.display = mute ? 'inline' : 'none';
+            if (participants['local']) participants['local'].video = !mute;
+            renderParticipants();
+            socket.emit('media-state', {
+                audio: localAudioTrack ? !localAudioTrack.muted : false,
+                video: !mute
+            });
+        };
 
-                document.getElementById('localCamStatus').style.display = videoTrack.enabled ? 'none' : 'inline';
-                if (participants['local']) participants['local'].video = videoTrack.enabled;
-                renderParticipants();
-
-                const audioTrack = localStream.getAudioTracks()[0];
-                socket.emit('media-state', { audio: audioTrack ? audioTrack.enabled : true, video: videoTrack.enabled });
-            }
+        // Sahna Çyk / Sahnadan Düş
+        stageBtn.onclick = () => {
+            if (myRole === 'audience') socket.emit('request-stage');
+            else socket.emit('leave-stage');
         };
 
         // Eliňi Götermek
@@ -1512,60 +1703,56 @@
                 raiseHandBtn.textContent = "✋ Eliňi Göter";
                 raiseHandBtn.classList.remove('active');
             }
+            if (participants['local']) participants['local'].hand = isHandRaised;
+            renderParticipants();
             socket.emit('raise-hand', { raised: isHandRaised });
         };
 
-        // Ekran Paýlaşmak (Screen Sharing)
+        // Ekran Paýlaşmak (Screen Sharing): sahnada bolanda kameranyň ýerine ekran ugradylýar
         shareScreenBtn.onclick = async () => {
-            if (screenStream) {
-                // Eger eýýäm ekran paýlaşylýan bolsa, ony sakla we kamera gaýt
-                stopScreenSharing();
-            } else {
-                try {
-                    // Brauzerden ekrany ýa-da programmany paýlaşmaga rugsat soramak
-                    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                    
-                    // Biziň görýän wideomyzy ekrana çalyşmak
-                    localVideo.srcObject = screenStream;
-
-                    // Ähli baglanan ulanyjylara-da ekran wideosyny ibermek
-                    const screenTrack = screenStream.getVideoTracks()[0];
-                    Object.values(peers).forEach(pc => {
-                        const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                        if (sender) sender.replaceTrack(screenTrack);
-                    });
-                    
-                    shareScreenBtn.textContent = "Ekran Paýlaşmagy Bes Et";
-                    shareScreenBtn.classList.add('sharing');
-
-                    // Eger ulanyjy brauzeriň öz düwmesinden "Stop sharing" bassa
-                    screenTrack.onended = stopScreenSharing;
-
-                } catch (error) {
-                    console.error("Ekran paýlaşmak ýalňyşlygy:", error);
+            if (myRole !== 'host') {
+                alert('Ekran paýlaşmak üçin ilki «Sahna Çyk» düwmesine basyň.');
+                return;
+            }
+            if (screenVideoTrack) {
+                await stopScreenSharing();
+                return;
+            }
+            try {
+                screenVideoTrack = await AgoraRTC.createScreenVideoTrack({ encoderConfig: '720p_2' }, 'disable');
+                if (localVideoTrack) {
+                    await agoraClient.unpublish(localVideoTrack);
+                    localVideoTrack.stop();
                 }
+                await agoraClient.publish(screenVideoTrack);
+                screenVideoTrack.play('localPlayer', { fit: 'contain' });
+
+                shareScreenBtn.textContent = "Ekran Paýlaşmagy Bes Et";
+                shareScreenBtn.classList.add('sharing');
+
+                // Ulanyjy brauzeriň öz "Stop sharing" düwmesini bassa
+                screenVideoTrack.on('track-ended', () => stopScreenSharing());
+            } catch (error) {
+                console.error("Ekran paýlaşmak ýalňyşlygy:", error);
+                screenVideoTrack = null;
             }
         };
 
-        function stopScreenSharing() {
-            if (screenStream) {
-                screenStream.getTracks().forEach(track => track.stop());
-            }
-            // Täzeden öz wideo kameramyza (localStream) gaýdýarys
-            localVideo.srcObject = localStream;
+        async function stopScreenSharing(skipRestore) {
+            if (!screenVideoTrack) return;
+            const st = screenVideoTrack;
+            screenVideoTrack = null;
+            try { await agoraClient.unpublish(st); } catch (e) {}
+            try { st.stop(); st.close(); } catch (e) {}
 
-            // Ähli peer-lere-de kamera yzyna gaýtarylsyn
-            const cameraTrack = localStream.getVideoTracks()[0];
-            if (cameraTrack) {
-                Object.values(peers).forEach(pc => {
-                    const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
-                    if (sender) sender.replaceTrack(cameraTrack);
-                });
+            if (!skipRestore && localVideoTrack) {
+                try {
+                    await agoraClient.publish(localVideoTrack);
+                    localVideoTrack.play('localPlayer', { fit: 'cover' });
+                } catch (e) { console.error(e); }
             }
-
             shareScreenBtn.textContent = "🖥️ Ekran Paýlaş";
             shareScreenBtn.classList.remove('sharing');
-            screenStream = null;
         }
 
         // Söhbetdeşligi Ýazgy Etmek
